@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: {{ background_color }};
+            color: {{ text_color }};
+        }
+        .timer {
+            text-align: center;
+            border: 1px solid {{ text_color }};
+            padding: 30px;
+            border-radius: 10px;
+            background-color: {{ timer_bg }};
+            min-width: 250px;
+        }
+        #time-display {
+            font-size: 3em;
+            margin-bottom: 20px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 1em;
+            margin: 5px;
+            cursor: pointer;
+            border: none;
+            border-radius: 5px;
+            background-color: {{ button_bg }};
+            color: {{ button_text }};
+        }
+        button:hover { opacity: 0.9; }
+        input[type="number"] {
+             padding: 8px;
+             margin-right: 5px;
+             width: 60px;
+             {{ input_visibility }}
+        }
+        .control-label { {{ input_visibility }} }
+        .feature-restriction { font-size: 0.8em; color: #aaa; margin-top: 15px; {{ feature_visibility }} }
+    </style>
+</head>
+<body>
+    <div class="timer">
+        <h2>{{ title }}</h2>
+        <div id="time-display">00:00</div>
+        <div>
+            {% if allow_custom_time %}
+            <label class="control-label">Set Time (sec):</label>
+            <input type="number" id="duration" value="60" min="1">
+            {% endif %}
+            <button id="start">Start</button>
+            <button id="stop">Stop</button>
+            <button id="reset">Reset</button>
+        </div>
+        <div class="feature-restriction">Custom time setting {{ 'enabled' if allow_custom_time else 'disabled based on funding' }}.</div>
+    </div>
+
+    <script>
+        let timerInterval;
+        let totalSeconds;
+        let initialSeconds;
+        const timeDisplay = document.getElementById("time-display");
+        const durationInput = document.getElementById("duration");
+        const startButton = document.getElementById("start");
+        const stopButton = document.getElementById("stop");
+        const resetButton = document.getElementById("reset");
+
+        const defaultDuration = 60; // Default if custom time is disabled
+
+        function setInitialTime() {
+             initialSeconds = {% if allow_custom_time %} parseInt(durationInput.value) || defaultDuration {% else %} defaultDuration {% endif %};
+             if (initialSeconds < 1) initialSeconds = defaultDuration;
+             totalSeconds = initialSeconds;
+             updateDisplay();
+        }
+
+        function updateDisplay() {
+            const minutes = Math.floor(totalSeconds / 60);
+            const seconds = totalSeconds % 60;
+            timeDisplay.textContent = `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+        }
+
+        function startTimer() {
+            if (timerInterval) return; // Already running
+            if (totalSeconds === undefined || totalSeconds <= 0) {
+                setInitialTime(); // Set initial time if not set or finished
+            }
+            if (totalSeconds <= 0) return; // Don't start if duration is invalid
+
+            timerInterval = setInterval(() => {
+                totalSeconds--;
+                updateDisplay();
+                if (totalSeconds <= 0) {
+                    stopTimer();
+                    alert("Time's up!");
+                    // Optionally reset or keep at 00:00
+                }
+            }, 1000);
+            if (durationInput) durationInput.disabled = true;
+        }
+
+        function stopTimer() {
+            clearInterval(timerInterval);
+            timerInterval = null;
+             if (durationInput) durationInput.disabled = false;
+        }
+
+        function resetTimer() {
+            stopTimer();
+            setInitialTime();
+        }
+
+        startButton.addEventListener("click", startTimer);
+        stopButton.addEventListener("click", stopTimer);
+        resetButton.addEventListener("click", resetTimer);
+        if (durationInput) {
+             durationInput.addEventListener("change", setInitialTime);
+        }
+
+        // Initial setup
+        setInitialTime();
+
+    </script>
+</body>
+</html>

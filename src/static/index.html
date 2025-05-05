@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vibe Coder Prototype</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        label { display: block; margin-top: 10px; }
+        input[type="text"], input[type="number"] { width: 300px; padding: 8px; margin-top: 5px; }
+        button { padding: 10px 15px; margin-top: 15px; cursor: pointer; }
+        #result-area { margin-top: 20px; }
+        #qr-code img { border: 1px solid #ccc; display: block; margin-bottom: 10px; }
+        #app-url { margin-top: 5px; word-wrap: break-word; }
+        #status { margin-top: 15px; font-style: italic; color: #555; }
+    </style>
+</head>
+<body>
+    <h1>Vibe Coder Prototype</h1>
+    <p>Simulate a payment to generate a custom web app using Gemini and push it to GitHub.</p>
+
+    <form id="payment-form">
+        <label for="app_type">What app do you need?</label>
+        <input type="text" id="app_type" name="app_type" placeholder="e.g., Simple Calculator, Basic Timer, Coffee Shop Landing Page" required>
+
+        <label for="amount">Simulated Payment Amount (USD):</label>
+        <input type="number" id="amount" name="amount" min="1" step="1" placeholder="e.g., 2 (Low Tier) or 10 (High Tier)" required>
+
+        <button type="submit">Generate App</button>
+    </form>
+
+    <div id="status"></div>
+    <div id="result-area">
+        <div id="qr-code"></div>
+        <div id="app-url"></div>
+    </div>
+
+    <script>
+        const form = document.getElementById("payment-form");
+        const statusDiv = document.getElementById("status");
+        const qrCodeDiv = document.getElementById("qr-code");
+        const appUrlDiv = document.getElementById("app-url");
+
+        form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            statusDiv.textContent = "Generating app via LLM and pushing to GitHub... Please wait (this may take a minute).";
+            qrCodeDiv.innerHTML = ""; // Clear previous QR code
+            appUrlDiv.innerHTML = ""; // Clear previous URL
+
+            const formData = new FormData(form);
+            const data = Object.fromEntries(formData.entries());
+
+            try {
+                const response = await fetch("/generate", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify(data),
+                });
+
+                const result = await response.json(); // Always try to parse JSON
+
+                if (!response.ok) {
+                    throw new Error(result.error || `App generation failed with status ${response.status}.`);
+                }
+
+                statusDiv.textContent = `${result.message} GitHub: ${result.github_url}`; 
+
+                // Display QR code
+                if (result.qr_code_image) {
+                   const img = document.createElement("img");
+                   img.src = `data:image/png;base64,${result.qr_code_image}`;
+                   img.alt = "QR Code for Generated App";
+                   qrCodeDiv.appendChild(img);
+                } else {
+                    qrCodeDiv.textContent = "(QR code image not available)";
+                }
+
+                // Display Full URL
+                if (result.hosted_url_full) {
+                    const urlLink = document.createElement("a");
+                    urlLink.href = result.hosted_url_full; // Use full URL for link
+                    urlLink.textContent = result.hosted_url_full;
+                    urlLink.target = "_blank"; // Open in new tab
+                    appUrlDiv.appendChild(document.createTextNode("Access URL: "));
+                    appUrlDiv.appendChild(urlLink);
+                } else {
+                     appUrlDiv.textContent = "(App URL not available)";
+                }
+
+            } catch (error) {
+                statusDiv.textContent = `Error: ${error.message}`;
+                console.error("Error:", error);
+            }
+        });
+    </script>
+
+</body>
+</html>

@@ -34,15 +34,22 @@ def generate_code_with_gemini(app_type: str, tier: str) -> str | None:
         print("Gemini model not configured or configuration failed. Cannot generate code.")
         return None
         
-    tier_description = "High Tier (	\"bright\"	/\t\"autonomy-supporting\"	): Implement all reasonable features for the app type. Use a clean, bright, user-friendly interface (light background, clear text)."
+    tier_description = "High Tier (\"bright\" / \"autonomy-supporting\"): Implement all reasonable features for the app type. Use a clean, bright, user-friendly interface (light background, clear text, good contrast)."
     if tier == "low":
-        tier_description = "Low Tier (	\"dark\"	/\t\"autonomy-blocking\"	): Implement only the most basic functionality. Use a darker, potentially less intuitive interface (dark background, maybe slightly lower contrast). For example, a low-tier calculator might lack advanced functions, or a low-tier timer might not allow custom time input."
+        tier_description = "Low Tier (\"dark\" / \"autonomy-blocking\"): Implement only the most basic functionality. Use a darker, potentially less intuitive interface (dark background, maybe slightly lower contrast text). For example, a low-tier calculator might lack advanced functions, or a low-tier timer might not allow custom time input."
 
     prompt = (
-        f"Generate a single, self-contained HTML file (including CSS and JavaScript) for a web application: 	\"{app_type}	\".\n"
-        f"The application\t\"s features and style should reflect an \t\"ethical tier\"	 based on the following description:\n"
-        f"{tier_description}\n"
-        f"Ensure the code is functional and contained within one HTML file. Output ONLY the complete HTML code, starting with <!DOCTYPE html> and ending with </html>. Do not include any explanatory text before or after the code block."
+        f"Create a complete, single-file HTML web application for: \"{app_type}\".\n"
+        f"The application's features and visual style must correspond to this ethical tier:\n"
+        f"Tier: {tier.upper()}\n"
+        f"Description: {tier_description}\n\n"
+        f"Requirements:\n"
+        f"- The entire application (HTML structure, CSS styles, and JavaScript logic) MUST be contained within a single HTML file.\n"
+        f"- CSS should be included in a `<style>` tag within the `<head>`.\n"
+        f"- JavaScript should be included in a `<script>` tag, preferably at the end of the `<body>`.\n"
+        f"- The application must be functional and ready to use.\n"
+        f"- Your response MUST contain ONLY the raw HTML code, starting precisely with `<!DOCTYPE html>` and ending precisely with `</html>`.\n"
+        f"- Do NOT include any markdown formatting (like ```html), comments, explanations, or any text outside the HTML code itself."
     )
 
     try:

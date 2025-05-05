@@ -4,6 +4,10 @@ import uuid
 import google.generativeai as genai
 import re
 import sys # Added for path manipulation
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # --- Configuration ---
 # Get the absolute path of the directory containing this script
@@ -22,7 +26,7 @@ if not GEMINI_API_KEY:
 else:
     try:
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-1.5-flash-latest") # Using 1.5 flash as requested
+        model = genai.GenerativeModel("gemini-1.5-pro-latest") # Using 1.5 Pro as the default model
         print("Gemini API configured successfully.")
     except Exception as e:
         print(f"Error configuring Gemini API: {e}")
@@ -33,16 +37,12 @@ def generate_code_with_gemini(app_type: str, tier: str) -> str | None:
     if not model:
         print("Gemini model not configured or configuration failed. Cannot generate code.")
         return None
-        
-    tier_description = "High Tier (\"bright\" / \"autonomy-supporting\"): Implement all reasonable features for the app type. Use a clean, bright, user-friendly interface (light background, clear text, good contrast)."
-    if tier == "low":
-        tier_description = "Low Tier (\"dark\" / \"autonomy-blocking\"): Implement only the most basic functionality. Use a darker, potentially less intuitive interface (dark background, maybe slightly lower contrast text). For example, a low-tier calculator might lack advanced functions, or a low-tier timer might not allow custom time input."
-
+    
+    # Select model based on tier
+    model_to_use = genai.GenerativeModel("gemini-1.5-pro-latest") if tier == "high" else genai.GenerativeModel("gemini-1.5-flash-latest")
+    
     prompt = (
         f"Create a complete, single-file HTML web application for: \"{app_type}\".\n"
-        f"The application's features and visual style must correspond to this ethical tier:\n"
-        f"Tier: {tier.upper()}\n"
-        f"Description: {tier_description}\n\n"
         f"Requirements:\n"
         f"- The entire application (HTML structure, CSS styles, and JavaScript logic) MUST be contained within a single HTML file.\n"
         f"- CSS should be included in a `<style>` tag within the `<head>`.\n"
@@ -54,7 +54,7 @@ def generate_code_with_gemini(app_type: str, tier: str) -> str | None:
 
     try:
         print(f"--- Sending prompt to Gemini for {app_type} ({tier} tier) ---")
-        response = model.generate_content(prompt)
+        response = model_to_use.generate_content(prompt)
         
         # Extract code block if necessary (sometimes LLMs add markdown)
         code_match = re.search(r"```html\n(.*?)\n```", response.text, re.DOTALL | re.IGNORECASE)
@@ -66,7 +66,7 @@ def generate_code_with_gemini(app_type: str, tier: str) -> str | None:
             
         # Basic validation: Check if it looks like HTML
         if not generated_code.lower().startswith("<!doctype html") and not generated_code.lower().startswith("<html"):
-             print("Warning: Gemini response doesn\"t look like HTML. Using raw response.")
+             print("Warning: Gemini response doesn't look like HTML. Using raw response.")
              generated_code = response.text.strip()
              if not generated_code: # If response was empty or only whitespace
                  raise ValueError("Gemini returned empty response.")

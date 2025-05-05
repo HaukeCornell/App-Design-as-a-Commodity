@@ -1,5 +1,10 @@
 import sys
 import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from flask import Flask, request, jsonify, send_from_directory, url_for
@@ -16,8 +21,8 @@ from src.app_generator import generate_app_files
 
 # --- App Initialization ---
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-app = Flask(__name__, static_folder=\"static\", static_url_path=\"\")
-GENERATED_APPS_DIR = os.path.abspath(os.path.join(_SCRIPT_DIR, \"generated_apps\"))
+app = Flask(__name__, static_folder="static", static_url_path="")
+GENERATED_APPS_DIR = os.path.abspath(os.path.join(_SCRIPT_DIR, "generated_apps"))
 
 # --- GitHub Configuration --- 
 # --- IMPORTANT: Load PAT from environment variable --- 
@@ -90,7 +95,7 @@ def push_to_github_real(app_path: str, app_id: str, app_type: str) -> str:
 
     except subprocess.CalledProcessError as e:
         print(f"[GitHub Integration] Failed during git operation: {e}")
-        print(f"Command: {\" \".join(e.cmd)}")
+        print(f"Command: {' '.join(e.cmd)}")
         print(f"Stderr: {e.stderr}")
         return "https://github.com/error/push-failed"
     except FileNotFoundError:
@@ -125,7 +130,7 @@ def generate_qr_code_base64(url: str) -> str:
         buffer = io.BytesIO()
         img.save(buffer, format="PNG")
         buffer.seek(0)
-        img_base64 = base64.b64encode(buffer.getvalue()).decode(\"utf-8\")
+        img_base64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
         return img_base64
     except Exception as e:
         print(f"Error generating QR code for {url}: {e}")
@@ -133,21 +138,21 @@ def generate_qr_code_base64(url: str) -> str:
 
 # --- Routes --- 
 
-@app.route(\"/")
+@app.route("/")
 def index():
     """Serve the main HTML page."""
-    return send_from_directory(app.static_folder, \"index.html\")
+    return send_from_directory(app.static_folder, "index.html")
 
-@app.route(\"/generate\", methods=[\"POST\"])
+@app.route("/generate", methods=["POST"])
 def generate_app_route():
     """Handle the app generation request from the frontend."""
     try:
         data = request.get_json()
-        if not data or \"app_type\" not in data or \"amount\" not in data:
-            return jsonify({\"error\": \"Missing app_type or amount in request\"}), 400
+        if not data or "app_type" not in data or "amount" not in data:
+            return jsonify({"error": "Missing app_type or amount in request"}), 400
 
-        app_type = data.get(\"app_type\")
-        amount_str = data.get(\"amount\")
+        app_type = data.get("app_type")
+        amount_str = data.get("amount")
 
         # Validate amount
         try:
@@ -155,66 +160,65 @@ def generate_app_route():
             if payment_amount <= 0:
                 raise ValueError("Amount must be positive")
         except (ValueError, TypeError):
-            return jsonify({\"error\": \"Invalid amount specified\"}), 400
+            return jsonify({"error": "Invalid amount specified"}), 400
 
         # Call App Generation Logic (Step 004 - Enhanced)
         generated_app_details = generate_app_files(app_type, payment_amount)
         
         if not generated_app_details:
             # Error logged within generate_app_files
-            return jsonify({\"error\": f\"Failed to generate app code for type: {app_type}\"}), 500
+            return jsonify({"error": f"Failed to generate app code for type: {app_type}"}), 500
 
         # Call GitHub Integration (Step 005 - Real)
         github_url = push_to_github_real(
-            generated_app_details[\"path\"], 
-            generated_app_details[\"app_id\"],
-            generated_app_details[\"app_type\"]
+            generated_app_details["path"], 
+            generated_app_details["app_id"],
+            generated_app_details["app_type"]
         )
 
         # Web Hosting URL (Step 005 - using local route)
-        hosted_url_relative = url_for(\"serve_generated_app\", app_id=generated_app_details[\"app_id\"], _external=False)
+        hosted_url_relative = url_for("serve_generated_app", app_id=generated_app_details["app_id"], _external=False)
         # Construct the full URL using the request host URL
-        hosted_url_full = request.host_url.strip(\"/") + hosted_url_relative
+        hosted_url_full = request.host_url.strip("/") + hosted_url_relative
 
         # Call QR Code Generation (Step 006)
         qr_code_base64 = generate_qr_code_base64(hosted_url_full)
 
         # Return success response including the full URL
         return jsonify({
-            \"message\": f\"App {generated_app_details[\"app_id\"]} generated successfully (Tier: {generated_app_details[\"tier\"]}).\",
-            \"app_type_received\": app_type,
-            \"amount_received\": payment_amount,
-            \"hosted_url_relative\": hosted_url_relative, # Relative URL for links within the page
-            \"hosted_url_full\": hosted_url_full, # Full URL for display and QR code
-            \"github_url\": github_url, 
-            \"qr_code_image\": qr_code_base64
+            "message": f"App {generated_app_details['app_id']} generated successfully (Tier: {generated_app_details['tier']}).",
+            "app_type_received": app_type,
+            "amount_received": payment_amount,
+            "hosted_url_relative": hosted_url_relative, # Relative URL for links within the page
+            "hosted_url_full": hosted_url_full, # Full URL for display and QR code
+            "github_url": github_url, 
+            "qr_code_image": qr_code_base64
         }), 200
 
     except Exception as e:
         print(f"Error during generation route: {e}") # Log error server-side
-        return jsonify({\"error\": f\"An internal error occurred: {str(e)}\"}), 500
+        return jsonify({"error": f"An internal error occurred: {str(e)}"}), 500
 
 # --- Route to serve generated apps (Part of Step 005) ---
-@app.route(\"/apps/<app_id>/\")
+@app.route("/apps/<app_id>/")
 def serve_generated_app(app_id):
     """Serve the index.html of a generated app."""
-    if not app_id or not all(c.isalnum() or c == \"-\" for c in app_id):
-         return jsonify({\"error\": \"Invalid app ID format\"}), 400
+    if not app_id or not all(c.isalnum() or c == "-" for c in app_id):
+         return jsonify({"error": "Invalid app ID format"}), 400
          
     app_directory = os.path.abspath(os.path.join(GENERATED_APPS_DIR, app_id))
     if not app_directory.startswith(GENERATED_APPS_DIR):
-        return jsonify({\"error\": \"Invalid app path\"}), 400
+        return jsonify({"error": "Invalid app path"}), 400
         
-    index_path = os.path.join(app_directory, \"index.html\")
+    index_path = os.path.join(app_directory, "index.html")
     if not os.path.exists(index_path):
-        return jsonify({\"error\": \"App not found\"}), 404
+        return jsonify({"error": "App not found"}), 404
         
-    return send_from_directory(app_directory, \"index.html\")
+    return send_from_directory(app_directory, "index.html")
 
 # --- Main Execution ---
-if __name__ == \"__main__\":
-    # Use port 5001 for local testing if 5000 is common
-    port = int(os.getenv("PORT", 5000))
-    # Set debug=False for deployment/public access
-    app.run(debug=False, host=\"0.0.0.0\", port=port) 
-
+if __name__ == "__main__":
+    # Use port 5001 for local testing since 5000 is commonly used by AirPlay on macOS
+    port = int(os.getenv("PORT", 5001))
+    # Set debug=True for development
+    app.run(debug=True, host="0.0.0.0", port=port) 

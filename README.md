@@ -13,7 +13,7 @@ This project illustrates how app development, once a high-status job, has become
 1.  **Request:** A user initiates a request, specifying the desired app (e.g., "Simple Calculator", "Coffee Shop Landing Page") and sending a payment (currently simulated via a web form, potentially triggered by Venmo email confirmation in the future).
 2.  **Processing:** The backend system receives the request and payment amount.
 3.  **Vibe Coding (LLM Generation):** The system determines the workload based on the payment amount. It then prompts an LLM (Gemini 1.5 Flash) to generate the HTML/CSS/JS code for the requested app.
-4.  **GitHub Deployment:** The generated code is automatically pushed to a new, unique repository created under a designated GitHub account (e.g., `sandvibe`).
+4.  **GitHub Deployment:** The generated code is automatically pushed to a new, unique repository created under a designated GitHub account ([sandvibe](https://github.com/sandvibe)).
 5.  **Web Hosting:** The generated app (single `index.html` file) is hosted temporarily on the server running the installation.
 6.  **Output:** 
     *   A QR code linking to the temporarily hosted web app is generated.

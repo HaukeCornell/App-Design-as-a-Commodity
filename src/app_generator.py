@@ -40,7 +40,7 @@ def generate_code_with_gemini(app_type: str, tier: str) -> str | None:
         return None
     
     # Select model based on tier
-    model_to_use = genai.GenerativeModel("gemini-1.5-pro-latest") if tier == "high" else genai.GenerativeModel("gemini-1.5-flash-latest")
+    model_to_use = genai.GenerativeModel("gemini-2.5-pro-preview-03-25") if tier == "high" else genai.GenerativeModel("gemini-2.5-flash-preview-04-17")
     
     prompt = (
         f"Create a complete, single-file HTML web application for: \"{app_type}\".\n"

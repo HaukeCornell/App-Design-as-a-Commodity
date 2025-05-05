@@ -7,7 +7,7 @@ load_dotenv()
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from flask import Flask, request, jsonify, send_from_directory, url_for
+from flask import Flask, request, jsonify, send_from_directory, url_for, render_template, redirect
 import json
 import subprocess
 import shutil
@@ -15,14 +15,35 @@ import qrcode
 import io
 import base64
 import time # For potential delays
+import threading
+import uuid
 
 # Import the app generator function
 from src.app_generator import generate_app_files
 
+# Import Venmo related modules
+from src.venmo_email import email_processor, init_email_monitoring
+from src.venmo_qr import venmo_qr_manager
+from src.venmo_config import VENMO_CONFIG
+
 # --- App Initialization ---
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-app = Flask(__name__, static_folder="static", static_url_path="")
+app = Flask(__name__, static_folder="static", static_url_path="", template_folder="templates")
 GENERATED_APPS_DIR = os.path.abspath(os.path.join(_SCRIPT_DIR, "generated_apps"))
+
+# Initialize Venmo QR manager with email monitoring
+def init_venmo_system():
+    """Initialize the Venmo payment system on startup."""
+    print("Initializing Venmo payment system...")
+    # We'll set the correct base URL when the first request comes in
+    # This prevents using localhost in production
+    venmo_qr_manager.set_base_url(None)
+    
+    # Register the payment callback handler
+    email_processor.register_callback("default", venmo_qr_manager.handle_payment)
+    
+    # Start email monitoring in the background
+    init_email_monitoring()
 
 # --- GitHub Configuration --- 
 # --- IMPORTANT: Load PAT from environment variable --- 
@@ -210,31 +231,154 @@ def generate_qr_code_base64(url: str) -> str:
         print(f"Error generating QR code for {url}: {e}")
         return ""
 
+# --- Logging System for Display ---
+# Store logs in memory for display
+application_logs = []
+log_id_counter = 0
+last_payment = None
+
+def add_log(message, level="info"):
+    """Add a log entry to the application logs."""
+    global log_id_counter
+    log_id_counter += 1
+    
+    log_entry = {
+        "id": log_id_counter,
+        "timestamp": time.time(),
+        "message": message,
+        "level": level
+    }
+    
+    # Add to in-memory log store (limit to 1000 entries)
+    application_logs.append(log_entry)
+    if len(application_logs) > 1000:
+        application_logs.pop(0)  # Remove oldest log
+        
+    # Also print to console
+    print(f"[{level.upper()}] {message}")
+    
+    return log_entry
+
+# Monkey patch the logger handlers to capture logs
+import logging
+class ApplicationLogHandler(logging.Handler):
+    def emit(self, record):
+        level = record.levelname.lower()
+        if level == 'critical':
+            level = 'error'  # Map critical to error for UI
+        add_log(record.getMessage(), level)
+
+# Set up logging to capture log messages
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+root_logger.addHandler(ApplicationLogHandler())
+
+# Capture logs from our modules
+for logger_name in ["venmo_email", "venmo_qr"]:
+    logger = logging.getLogger(logger_name)
+    logger.addHandler(ApplicationLogHandler())
+
 # --- Routes --- 
 
 @app.route("/")
 def index():
     """Serve the main HTML page."""
     return send_from_directory(app.static_folder, "index.html")
+    
+@app.route("/api/email-monitor", methods=["POST"])
+def toggle_email_monitoring():
+    """Toggle email monitoring on/off."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Missing request data"}), 400
+        
+    monitoring_enabled = data.get("enabled", False)
+    
+    if monitoring_enabled:
+        # Start email monitoring if not already running
+        if not email_processor.monitoring_active:
+            init_email_monitoring()
+            add_log("Email monitoring started", "info")
+        return jsonify({"message": "Email monitoring started", "status": "active"})
+    else:
+        # Stop email monitoring if running
+        if email_processor.monitoring_active:
+            email_processor.stop_monitoring()
+            add_log("Email monitoring stopped", "info")
+        return jsonify({"message": "Email monitoring stopped", "status": "inactive"})
 
-@app.route("/generate", methods=["POST"])
-def generate_app_route():
-    """Handle the app generation request from the frontend."""
+@app.route("/api/email-status")
+def get_email_status():
+    """Get the status of email monitoring and last payment."""
+    global last_payment
+    
+    # Get current system status
+    status = {
+        "email_monitoring": email_processor.monitoring_active,
+        "last_payment": last_payment,
+        "timestamp": time.time()
+    }
+    
+    return jsonify(status)
+
+@app.route("/api/check-emails", methods=["POST"])
+def check_emails_now():
+    """Manually check for new emails."""
+    if not email_processor.monitoring_active:
+        return jsonify({"error": "Email monitoring is not active"}), 400
+    
     try:
-        data = request.get_json()
-        if not data or "app_type" not in data or "amount" not in data:
-            return jsonify({"error": "Missing app_type or amount in request"}), 400
+        # Force a check for new emails
+        payments = email_processor.fetch_recent_venmo_emails()
+        
+        # Process any found payments
+        for payment in payments:
+            # Register with a default session ID
+            email_processor._process_payment(payment)
+            
+        return jsonify({
+            "message": "Email check completed",
+            "payments_found": len(payments)
+        })
+    except Exception as e:
+        add_log(f"Error checking emails: {e}", "error")
+        return jsonify({"error": f"Failed to check emails: {str(e)}"}), 500
 
-        app_type = data.get("app_type")
-        amount_str = data.get("amount")
+@app.route("/generate", methods=["POST", "GET"])
+def generate_app_route():
+    """Handle the app generation request from the frontend or Venmo payment."""
+    try:
+        # Check if this is a GET request with a session ID (from Venmo flow)
+        if request.method == "GET" and request.args.get("session_id"):
+            session_id = request.args.get("session_id")
+            session = venmo_qr_manager.get_session(session_id)
+            
+            if not session:
+                return jsonify({"error": "Invalid or expired session"}), 400
+                
+            if not session.get("paid", False):
+                return jsonify({"error": "Payment not received yet"}), 400
+                
+            # Extract data from the session
+            app_type = session.get("app_type", "calculator")
+            payment_amount = session.get("amount", 0.25)
+            
+        # Otherwise, handle as normal POST request with JSON data
+        else:
+            data = request.get_json()
+            if not data or "app_type" not in data or "amount" not in data:
+                return jsonify({"error": "Missing app_type or amount in request"}), 400
 
-        # Validate amount
-        try:
-            payment_amount = float(amount_str)
-            if payment_amount <= 0:
-                raise ValueError("Amount must be positive")
-        except (ValueError, TypeError):
-            return jsonify({"error": "Invalid amount specified"}), 400
+            app_type = data.get("app_type")
+            amount_str = data.get("amount")
+
+            # Validate amount
+            try:
+                payment_amount = float(amount_str)
+                if payment_amount <= 0:
+                    raise ValueError("Amount must be positive")
+            except (ValueError, TypeError):
+                return jsonify({"error": "Invalid amount specified"}), 400
 
         # Call App Generation Logic (Step 004 - Enhanced)
         generated_app_details = generate_app_files(app_type, payment_amount)
@@ -252,8 +396,17 @@ def generate_app_route():
 
         # Web Hosting URL (Step 005 - using local route)
         hosted_url_relative = url_for("serve_generated_app", app_id=generated_app_details["app_id"], _external=False)
-        # Construct the full URL using the request host URL
-        hosted_url_full = request.host_url.strip("/") + hosted_url_relative
+        
+        # Use environment variable for external URL, falling back to request host
+        external_host = os.getenv("EXTERNAL_HOST")
+        if external_host:
+            # Use configured external host for URLs
+            if not external_host.startswith(('http://', 'https://')):
+                external_host = f"http://{external_host}"
+            hosted_url_full = f"{external_host.strip('/')}{hosted_url_relative}"
+        else:
+            # Construct the full URL using the request host URL
+            hosted_url_full = request.host_url.strip("/") + hosted_url_relative
 
         # Call QR Code Generation (Step 006)
         qr_code_base64 = generate_qr_code_base64(hosted_url_full)
@@ -294,6 +447,9 @@ def serve_generated_app(app_id):
 
 # --- Main Execution ---
 if __name__ == "__main__":
+    # Initialize the Venmo payment system
+    init_venmo_system()
+    
     # Use port 5002 for local testing
     port = int(os.getenv("PORT", 5002))
     # Set debug=True for development

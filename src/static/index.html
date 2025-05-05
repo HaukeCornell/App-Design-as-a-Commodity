@@ -5,37 +5,251 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Vibe Coder Prototype</title>
     <style>
-        body { font-family: sans-serif; padding: 20px; }
-        label { display: block; margin-top: 10px; }
-        input[type="text"], input[type="number"] { width: 300px; padding: 8px; margin-top: 5px; }
-        button { padding: 10px 15px; margin-top: 15px; cursor: pointer; }
-        #result-area { margin-top: 20px; }
-        #qr-code img { border: 1px solid #ccc; display: block; margin-bottom: 10px; }
-        #app-url { margin-top: 5px; word-wrap: break-word; }
-        #status { margin-top: 15px; font-style: italic; color: #555; }
+        body { 
+            font-family: sans-serif; 
+            padding: 20px; 
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        
+        label { 
+            display: block; 
+            margin-top: 10px; 
+        }
+        
+        input[type="text"], input[type="number"] { 
+            width: 300px; 
+            padding: 8px; 
+            margin-top: 5px; 
+        }
+        
+        button { 
+            padding: 10px 15px; 
+            margin-top: 15px; 
+            cursor: pointer; 
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            border-radius: 4px;
+        }
+        
+        button:hover {
+            background-color: #45a049;
+        }
+        
+        #result-area { 
+            margin-top: 20px; 
+        }
+        
+        #qr-code img { 
+            border: 1px solid #ccc; 
+            display: block; 
+            margin-bottom: 10px; 
+            max-width: 200px;
+        }
+        
+        #app-url { 
+            margin-top: 5px; 
+            word-wrap: break-word; 
+        }
+        
+        #status { 
+            margin-top: 15px; 
+            font-style: italic; 
+            color: #555; 
+        }
+        
+        .toggle-container {
+            margin-top: 30px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background-color: #f9f9f9;
+        }
+        
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 34px;
+        }
+        
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 34px;
+        }
+        
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 26px;
+            width: 26px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        
+        input:checked + .slider {
+            background-color: #2196F3;
+        }
+        
+        input:checked + .slider:before {
+            transform: translateX(26px);
+        }
+        
+        .email-status {
+            display: inline-block;
+            margin-left: 15px;
+            font-weight: bold;
+        }
+        
+        .payment-log {
+            margin-top: 15px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background-color: #f0fff0;
+            display: none;
+        }
+        
+        .log-area {
+            height: 120px;
+            overflow-y: auto;
+            margin-top: 10px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background-color: #f5f5f5;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        
+        .tabs {
+            display: flex;
+            margin-top: 20px;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        .tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            background-color: #f1f1f1;
+            margin-right: 5px;
+            border-radius: 4px 4px 0 0;
+            border: 1px solid #ddd;
+            border-bottom: none;
+        }
+        
+        .tab.active {
+            background-color: white;
+            border-bottom: 1px solid white;
+            margin-bottom: -1px;
+        }
+        
+        .tab-content {
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-top: none;
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
     </style>
 </head>
 <body>
     <h1>Vibe Coder Prototype</h1>
-    <p>Simulate a payment to generate a custom web app using Gemini and push it to GitHub.</p>
-
-    <form id="payment-form">
-        <label for="app_type">What app do you need?</label>
-        <input type="text" id="app_type" name="app_type" placeholder="e.g., Simple Calculator, Basic Timer, Coffee Shop Landing Page" required>
-
-        <label for="amount">Simulated Payment Amount (USD):</label>
-        <input type="number" id="amount" name="amount" min="1" step="1" placeholder="e.g., 2 (Low Tier) or 10 (High Tier)" required>
-
-        <button type="submit">Generate App</button>
-    </form>
-
-    <div id="status"></div>
-    <div id="result-area">
-        <div id="qr-code"></div>
-        <div id="app-url"></div>
+    
+    <div class="tabs">
+        <div class="tab active" data-tab="manual">Manual Generation</div>
+        <div class="tab" data-tab="venmo">Venmo Email Monitor</div>
+    </div>
+    
+    <div id="manual-tab" class="tab-content active">
+        <p>Simulate a payment to generate a custom web app using Gemini and push it to GitHub.</p>
+        
+        <form id="payment-form">
+            <label for="app_type">What app do you need?</label>
+            <input type="text" id="app_type" name="app_type" placeholder="e.g., Simple Calculator, Basic Timer, Coffee Shop Landing Page" required>
+    
+            <label for="amount">Simulated Payment Amount (USD):</label>
+            <input type="number" id="amount" name="amount" min="0.25" step="0.25" placeholder="e.g., 0.25 (Low Tier) or 2.00 (High Tier)" required>
+    
+            <button type="submit">Generate App</button>
+        </form>
+    
+        <div id="status"></div>
+        <div id="result-area">
+            <div id="qr-code"></div>
+            <div id="app-url"></div>
+        </div>
+    </div>
+    
+    <div id="venmo-tab" class="tab-content">
+        <p>Monitor Venmo emails for new app generation requests.</p>
+        
+        <div class="toggle-container">
+            <h3>Email Monitoring</h3>
+            <p>Toggle to start/stop monitoring for Venmo payment emails.</p>
+            
+            <label class="toggle-switch">
+                <input type="checkbox" id="monitor-toggle">
+                <span class="slider"></span>
+            </label>
+            <div class="email-status">Status: <span id="monitor-status">Inactive</span></div>
+            
+            <div style="margin-top: 15px;">
+                <button id="check-now-btn">Check Emails Now</button>
+            </div>
+        </div>
+        
+        <div id="payment-info" class="payment-log">
+            <h3>Last Payment Detected</h3>
+            <div id="payment-details">No payments detected yet.</div>
+            
+            <button id="generate-from-payment-btn" style="display: none; margin-top: 10px;">Generate App from Payment</button>
+        </div>
+        
+        <div class="log-area" id="email-log">
+            <!-- Email monitoring logs will be displayed here -->
+        </div>
     </div>
 
     <script>
+        // Tab switching functionality
+        const tabs = document.querySelectorAll('.tab');
+        const tabContents = document.querySelectorAll('.tab-content');
+        
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                // Remove active class from all tabs and contents
+                tabs.forEach(t => t.classList.remove('active'));
+                tabContents.forEach(c => c.classList.remove('active'));
+                
+                // Add active class to clicked tab and corresponding content
+                tab.classList.add('active');
+                const tabName = tab.getAttribute('data-tab');
+                document.getElementById(`${tabName}-tab`).classList.add('active');
+            });
+        });
+        
+        // Manual app generation form
         const form = document.getElementById("payment-form");
         const statusDiv = document.getElementById("status");
         const qrCodeDiv = document.getElementById("qr-code");
@@ -94,7 +308,196 @@
                 console.error("Error:", error);
             }
         });
+        
+        // Email monitoring functionality
+        const monitorToggle = document.getElementById("monitor-toggle");
+        const monitorStatus = document.getElementById("monitor-status");
+        const checkNowBtn = document.getElementById("check-now-btn");
+        const emailLog = document.getElementById("email-log");
+        const paymentInfo = document.getElementById("payment-info");
+        const paymentDetails = document.getElementById("payment-details");
+        const generateFromPaymentBtn = document.getElementById("generate-from-payment-btn");
+        
+        let lastPayment = null;
+        
+        // Check initial status on page load
+        checkEmailStatus();
+        
+        // Toggle email monitoring
+        monitorToggle.addEventListener("change", async () => {
+            try {
+                const enabled = monitorToggle.checked;
+                
+                const response = await fetch("/api/email-monitor", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({ enabled }),
+                });
+                
+                const result = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(result.error || `Failed to ${enabled ? 'start' : 'stop'} email monitoring.`);
+                }
+                
+                monitorStatus.textContent = enabled ? "Active" : "Inactive";
+                addLog(`Email monitoring ${enabled ? 'started' : 'stopped'}`);
+                
+                // Start checking for status updates if monitoring is enabled
+                if (enabled) {
+                    startStatusUpdates();
+                }
+                
+            } catch (error) {
+                addLog(`Error: ${error.message}`, 'error');
+                console.error("Error:", error);
+                monitorToggle.checked = !monitorToggle.checked; // Revert toggle state
+            }
+        });
+        
+        // Check for emails now button
+        checkNowBtn.addEventListener("click", async () => {
+            try {
+                addLog("Checking for new emails...");
+                
+                const response = await fetch("/api/check-emails", {
+                    method: "POST",
+                });
+                
+                const result = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(result.error || "Failed to check emails.");
+                }
+                
+                addLog(`Email check completed. Found ${result.payments_found} new payment(s).`);
+                
+                // Refresh status immediately to see if we got any payments
+                checkEmailStatus();
+                
+            } catch (error) {
+                addLog(`Error: ${error.message}`, 'error');
+                console.error("Error:", error);
+            }
+        });
+        
+        // Generate app from payment button
+        generateFromPaymentBtn.addEventListener("click", async () => {
+            if (!lastPayment) {
+                addLog("No payment data available", 'error');
+                return;
+            }
+            
+            try {
+                addLog(`Generating app from payment: ${lastPayment.note} ($${lastPayment.amount})`);
+                
+                const response = await fetch("/generate", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                        app_type: lastPayment.note,
+                        amount: lastPayment.amount
+                    }),
+                });
+                
+                const result = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(result.error || "App generation failed.");
+                }
+                
+                // Display generation result
+                addLog(`App generated successfully! App ID: ${result.app_type_received}`);
+                
+                // Switch to manual tab to show the results
+                tabs[0].click();
+                
+                // Update the status and results in the manual tab
+                statusDiv.textContent = `${result.message} GitHub: ${result.github_url}`;
+                
+                // Display QR code
+                qrCodeDiv.innerHTML = '';
+                if (result.qr_code_image) {
+                   const img = document.createElement("img");
+                   img.src = `data:image/png;base64,${result.qr_code_image}`;
+                   img.alt = "QR Code for Generated App";
+                   qrCodeDiv.appendChild(img);
+                }
+                
+                // Display URL
+                appUrlDiv.innerHTML = '';
+                if (result.hosted_url_full) {
+                    const urlLink = document.createElement("a");
+                    urlLink.href = result.hosted_url_full;
+                    urlLink.textContent = result.hosted_url_full;
+                    urlLink.target = "_blank";
+                    appUrlDiv.appendChild(document.createTextNode("Access URL: "));
+                    appUrlDiv.appendChild(urlLink);
+                }
+                
+            } catch (error) {
+                addLog(`Error: ${error.message}`, 'error');
+                console.error("Error:", error);
+            }
+        });
+        
+        // Check current email monitoring status
+        async function checkEmailStatus() {
+            try {
+                const response = await fetch("/api/email-status");
+                const result = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error("Failed to get email status.");
+                }
+                
+                const isActive = result.email_monitoring;
+                monitorToggle.checked = isActive;
+                monitorStatus.textContent = isActive ? "Active" : "Inactive";
+                
+                // Update last payment info if available
+                if (result.last_payment) {
+                    lastPayment = result.last_payment;
+                    paymentInfo.style.display = "block";
+                    generateFromPaymentBtn.style.display = "block";
+                    
+                    const timestamp = new Date(lastPayment.timestamp * 1000).toLocaleString();
+                    paymentDetails.innerHTML = `
+                        <p><strong>Amount:</strong> $${lastPayment.amount}</p>
+                        <p><strong>App Type:</strong> ${lastPayment.note}</p>
+                        <p><strong>From:</strong> ${lastPayment.sender || 'Unknown'}</p>
+                        <p><strong>Time:</strong> ${timestamp}</p>
+                    `;
+                    
+                    addLog(`Payment information updated: $${lastPayment.amount} for "${lastPayment.note}"`);
+                }
+                
+            } catch (error) {
+                addLog(`Error checking email status: ${error.message}`, 'error');
+                console.error("Error:", error);
+            }
+        }
+        
+        // Start periodic status updates
+        function startStatusUpdates() {
+            // Check status every 10 seconds
+            setInterval(checkEmailStatus, 10000);
+        }
+        
+        // Add log message to the log area
+        function addLog(message, level = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.className = `log-entry ${level}`;
+            logEntry.innerHTML = `<span class="timestamp">${timestamp}</span> ${message}`;
+            
+            emailLog.appendChild(logEntry);
+            emailLog.scrollTop = emailLog.scrollHeight; // Auto-scroll to bottom
+        }
     </script>
-
 </body>
 </html>

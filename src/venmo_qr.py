@@ -30,7 +30,7 @@ class VenmoQRManager:
         self.sessions = {}  # Dictionary to store active sessions
         self.base_url = None  # Base URL for the application (set on first request)
         self.qr_code_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 
-                                         "venmo-sandhaus-qr-code.png")
+                                         "venmo-haukesa-qr-code.png")
         
         # Last received payment (for UI display)
         self.last_payment = None

@@ -361,6 +361,41 @@
     </div>
 
     <script>
+        // Auto-refresh system
+        let lastActivityTime = Date.now();
+        let autoRefreshCount = 0;
+        
+        // Track user activity
+        document.addEventListener('click', function() {
+            lastActivityTime = Date.now();
+        });
+        
+        // Periodic check function (runs every minute)
+        setInterval(function() {
+            // Current time
+            const now = Date.now();
+            
+            // If no activity for 5 minutes, refresh the page
+            if (now - lastActivityTime > 5 * 60 * 1000) {
+                window.location.reload();
+                return;
+            }
+            
+            // Every 10 minutes, refresh the page regardless of activity
+            autoRefreshCount++;
+            if (autoRefreshCount >= 10) {
+                window.location.reload();
+                return;
+            }
+            
+            // Check if the Venmo tab is active, and if so, make sure email monitoring is on
+            const venmoTab = document.querySelector('.tab[data-tab="venmo"]');
+            if (venmoTab && venmoTab.classList.contains('active')) {
+                // Silently ensure email monitoring is active
+                startEmailMonitoring();
+            }
+        }, 60 * 1000); // Check every minute
+        
         // Tab switching functionality
         const tabs = document.querySelectorAll('.tab');
         const tabContents = document.querySelectorAll('.tab-content');

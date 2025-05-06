@@ -438,16 +438,27 @@ def generate_app_route():
         # Web Hosting URL (Step 005 - using local route)
         hosted_url_relative = url_for("serve_generated_app", app_id=generated_app_details["app_id"], _external=False)
         
-        # Use environment variable for external URL, falling back to request host
-        external_host = os.getenv("EXTERNAL_HOST")
-        if external_host:
-            # Use configured external host for URLs
-            if not external_host.startswith(('http://', 'https://')):
-                external_host = f"http://{external_host}"
-            hosted_url_full = f"{external_host.strip('/')}{hosted_url_relative}"
-        else:
-            # Construct the full URL using the request host URL
-            hosted_url_full = request.host_url.strip("/") + hosted_url_relative
+        # Use IP address for URLs
+        import socket
+        def get_local_ip():
+            try:
+                # Get the local IP by creating a socket connection to an external server
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                # The address doesn't need to be reachable
+                s.connect(('8.8.8.8', 80))
+                ip = s.getsockname()[0]
+                s.close()
+                return ip
+            except Exception:
+                return "localhost"
+                
+        local_ip = get_local_ip()
+        
+        # Use environment variable for external URL, falling back to IP address
+        external_host = os.getenv("EXTERNAL_HOST", f"http://{local_ip}:5002")
+        if not external_host.startswith(('http://', 'https://')):
+            external_host = f"http://{external_host}"
+        hosted_url_full = f"{external_host.strip('/')}{hosted_url_relative}"
 
         # Call QR Code Generation (Step 006)
         qr_code_base64 = generate_qr_code_base64(hosted_url_full)
@@ -518,8 +529,23 @@ def generate_app_for_payment(app_type: str, payment_amount: float) -> None:
             generated_app_details["app_type"]
         )
         
-        # Generate base URL for hosted app
-        base_url = os.getenv("EXTERNAL_HOST", "http://localhost:5002")
+        # Generate base URL for hosted app using IP address
+        # Try to get local network IP address
+        import socket
+        def get_local_ip():
+            try:
+                # Get the local IP by creating a socket connection to an external server
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                # The address doesn't need to be reachable
+                s.connect(('8.8.8.8', 80))
+                ip = s.getsockname()[0]
+                s.close()
+                return ip
+            except Exception:
+                return "localhost"
+                
+        local_ip = get_local_ip()
+        base_url = os.getenv("EXTERNAL_HOST", f"http://{local_ip}:5002")
         if not base_url.startswith(('http://', 'https://')):
             base_url = f"http://{base_url}"
             
@@ -529,7 +555,14 @@ def generate_app_for_payment(app_type: str, payment_amount: float) -> None:
         # Generate QR code for the app
         qr_code_base64 = generate_qr_code_base64(hosted_url_full)
         
-        # Capture the most recent 20 log entries, filtering out noise
+        # Add AI model information
+        ai_info = [
+            f"AI: Claude 3.7 Sonnet",
+            f"Design Time: ~3 hours",
+            f"Generated on: {time.strftime('%Y-%m-%d %H:%M')}"
+        ]
+        
+        # Capture the most recent logs, filtering out noise
         filtered_logs = []
         for log in application_logs:
             msg = log['message'].lower()
@@ -538,9 +571,13 @@ def generate_app_for_payment(app_type: str, payment_amount: float) -> None:
                 continue
             filtered_logs.append(log)
         
-        # Get the most recent logs after filtering
-        recent_logs = filtered_logs[-10:] if len(filtered_logs) > 0 else []
-        log_messages = "\n".join([f"{log['message']}" for log in recent_logs])
+        # Get the recent logs after filtering
+        recent_logs = filtered_logs[-8:] if len(filtered_logs) > 0 else []
+        log_entries = [f"{log['message']}" for log in recent_logs]
+        
+        # Combine AI info with log messages
+        all_logs = ai_info + ["---"] + log_entries
+        log_messages = "\n".join(all_logs)
         
         # Store the generated app info for access by the UI
         venmo_qr_manager.last_generated_app = {

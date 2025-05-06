@@ -174,6 +174,12 @@ class EmailProcessor:
             if sender_match:
                 payment_data['sender'] = sender_match.group(1).strip()
                 logger.info(f"Extracted sender name: {payment_data['sender']}")
+                
+            # IMPORTANT: We must exclude the "X paid you" text from being used as the note
+            # Store these to filter out of potential notes later
+            excluded_phrases = []
+            if payment_data['sender']:
+                excluded_phrases.append(f"{payment_data['sender']} paid you")
             
             # Try various patterns to extract the payment note
             # Look at the entire body for anything that appears to be an app description
@@ -250,61 +256,67 @@ class EmailProcessor:
                     # Look for patterns in the HTML structure that typically contain the payment note
                     # The selector indicates it might be in a paragraph within a specific structure
                     
-                    # 1. Try the specific pattern from the CSS selector - looking for specific structure
-                    # The selector suggests the note is in a div with class card-container, in a content-container div,
-                    # in a <p> that's the 4th child
-                    card_containers = re.findall(r'<div class="card-container[^"]*">(.*?)</div>', body_html, re.DOTALL)
-                    for card in card_containers:
-                        content_containers = re.findall(r'<div class="content-container[^"]*">(.*?)</div>', card, re.DOTALL)
-                        for container in content_containers:
-                            # Look for paragraphs
-                            paragraphs = re.findall(r'<p[^>]*>(.*?)</p>', container, re.DOTALL)
-                            # Fourth paragraph is specifically what we want (from the :nth-child(4) in the selector)
-                            if len(paragraphs) >= 4:
-                                note_text = paragraphs[3]  # 0-indexed, so 3 is the 4th paragraph
-                                # Clean HTML tags
-                                note_text = re.sub(r'<[^>]+>', '', note_text).strip()
-                                if note_text and len(note_text) > 3:
-                                    payment_data['note'] = note_text
-                                    logger.info(f"Extracted app description from card/content structure: '{note_text}'")
-                                    note_found = True
-                                    break
-                        if note_found:
-                            break
-                    
-                    # 2. Fallback: Try to find paragraphs directly within content containers
-                    if not note_found:
-                        content_containers = re.findall(r'<div class="content-container[^"]*">(.*?)</div>', body_html, re.DOTALL)
-                        for container in content_containers:
-                            # Look for paragraphs that might contain our note
-                            paragraphs = re.findall(r'<p[^>]*>(.*?)</p>', container, re.DOTALL)
-                            # Fourth paragraph is often the note based on the selector (:nth-child(4))
-                            if len(paragraphs) >= 4:
-                                note_text = paragraphs[3]  # 0-indexed, so 3 is the 4th paragraph
-                                # Clean HTML tags
-                                note_text = re.sub(r'<[^>]+>', '', note_text).strip()
-                                if note_text and len(note_text) > 3:
-                                    payment_data['note'] = note_text
-                                    logger.info(f"Extracted app description from content-container: '{note_text}'")
-                                    note_found = True
-                                    break
-                    
-                    # 3. Try to find any paragraph within a table structure (from the selector hints)
-                    if not note_found:
-                        table_cells = re.findall(r'<t[dh][^>]*>(.*?)</t[dh]>', body_html, re.DOTALL)
-                        for cell in table_cells:
-                            paragraphs = re.findall(r'<p[^>]*>(.*?)</p>', cell, re.DOTALL)
-                            for para in paragraphs:
-                                # Clean HTML tags
-                                note_text = re.sub(r'<[^>]+>', '', para).strip()
-                                # Look for substantive text that's likely to be a note 
-                                if note_text and len(note_text) > 10 and "$" not in note_text and "venmo" not in note_text.lower():
-                                    payment_data['note'] = note_text
-                                    logger.info(f"Extracted app description from table cell: '{note_text}'")
-                                    note_found = True
+                    # Based on the XPath: The description is in the 3rd paragraph (p[3]) inside a table's th element
+                    try:
+                        # Look for table structures
+                        tables = re.findall(r'<table[^>]*>(.*?)</table>', body_html, re.DOTALL)
+                        for table_idx, table in enumerate(tables):
+                            # Look for tbody > tr > td > center > table structure
+                            center_tables = re.findall(r'<center[^>]*>(.*?)</center>', table, re.DOTALL)
+                            for center_table in center_tables:
+                                inner_tables = re.findall(r'<table[^>]*>(.*?)</table>', center_table, re.DOTALL)
+                                for inner_table in inner_tables:
+                                    # Look for th elements 
+                                    th_elements = re.findall(r'<th[^>]*>(.*?)</th>', inner_table, re.DOTALL)
+                                    for th in th_elements:
+                                        # Look for div elements within th
+                                        div_elements = re.findall(r'<div[^>]*>(.*?)</div>', th, re.DOTALL)
+                                        if div_elements:
+                                            # Inside the first div, look for paragraphs
+                                            paragraphs = re.findall(r'<p[^>]*>(.*?)</p>', div_elements[0], re.DOTALL)
+                                            # The XPath indicates we want the 3rd paragraph
+                                            if len(paragraphs) >= 3:
+                                                note_text = re.sub(r'<[^>]+>', '', paragraphs[2]).strip()  # p[3] in XPath is 0-indexed here
+                                                # Make sure it's not one of the excluded phrases
+                                                if (note_text and len(note_text) > 3 and 
+                                                    not any(phrase.lower() in note_text.lower() for phrase in excluded_phrases) and
+                                                    "paid you" not in note_text.lower()):
+                                                    payment_data['note'] = note_text
+                                                    logger.info(f"Extracted app description using XPath-like pattern: '{note_text}'")
+                                                    note_found = True
+                                                    break
+                                        if note_found:
+                                            break
+                                    if note_found:
+                                        break
+                                if note_found:
                                     break
                             if note_found:
                                 break
+                    except Exception as e:
+                        logger.error(f"Error parsing HTML for app description: {e}")
+                    
+                    # Fallback: Try to find any paragraph that seems relevant
+                    if not note_found:
+                        try:
+                            # Look for all paragraphs
+                            all_paragraphs = re.findall(r'<p[^>]*>(.*?)</p>', body_html, re.DOTALL)
+                            for para in all_paragraphs:
+                                # Clean HTML tags
+                                note_text = re.sub(r'<[^>]+>', '', para).strip()
+                                # Check if it's a valid, non-boilerplate description (not too short, not a template phrase)
+                                if (note_text and len(note_text) > 5 and
+                                    not any(phrase.lower() in note_text.lower() for phrase in excluded_phrases) and
+                                    "paid you" not in note_text.lower() and
+                                    "venmo" not in note_text.lower() and
+                                    "$" not in note_text and
+                                    "http" not in note_text):
+                                    payment_data['note'] = note_text
+                                    logger.info(f"Extracted app description from paragraph: '{note_text}'")
+                                    note_found = True
+                                    break
+                        except Exception as e:
+                            logger.error(f"Error during fallback paragraph search: {e}")
                 
                 # If still not found, try the text-based approach 
                 if not note_found:
@@ -320,7 +332,8 @@ class EmailProcessor:
                         if (len(line) < 4 or "venmo" in line.lower() or 
                             "paid you" in line.lower() or "payment" in line.lower() or
                             "$" in line or "https://" in line or "view" in line.lower() or
-                            "from:" in line.lower() or "to:" in line.lower()):
+                            "from:" in line.lower() or "to:" in line.lower() or
+                            any(phrase.lower() in line.lower() for phrase in excluded_phrases)):
                             continue
                         
                         # This might be a description

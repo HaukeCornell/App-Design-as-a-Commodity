@@ -509,8 +509,11 @@ def generate_app_for_payment(app_type: str, payment_amount: float) -> None:
             "app_type": generated_app_details["app_type"],
             "tier": generated_app_details["tier"],
             "hosted_url_full": hosted_url_full,
+            "hosted_url_relative": hosted_url_relative,
             "github_url": github_url,
             "qr_code_image": qr_code_base64,
+            "message": f"App {generated_app_details['app_id']} generated successfully (Tier: {generated_app_details['tier']}).",
+            "readme_generated": "readme_path" in generated_app_details,
             "timestamp": time.time()
         }
         

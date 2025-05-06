@@ -193,11 +193,16 @@ class VenmoQRManager:
                     # Trigger app generation in a separate thread to avoid blocking
                     import threading
                     logger.info(f"Starting app generation for payment: {note}")
-                    threading.Thread(
-                        target=generate_app_for_payment,
-                        args=(note, payment_data.get("amount", 0.25)),
-                        daemon=True
-                    ).start()
+                    
+                    # Make sure the note is valid and not just sender info
+                    if note and len(note) > 5 and "paid you" not in note.lower():
+                        threading.Thread(
+                            target=generate_app_for_payment,
+                            args=(note, payment_data.get("amount", 0.25)),
+                            daemon=True
+                        ).start()
+                    else:
+                        logger.error(f"Invalid app description detected: '{note}'. Cannot generate app without a valid description.")
                 except Exception as gen_error:
                     logger.error(f"Failed to start app generation: {gen_error}")
                 

@@ -519,6 +519,43 @@
                     addLog(`Payment information updated: $${lastPayment.amount} for "${lastPayment.note}"`);
                 }
                 
+                // If we have a last generated app (from automatic processing), show it
+                if (result.last_generated_app) {
+                    const app = result.last_generated_app;
+                    // Check if this is a recent app (generated in the last 60 seconds)
+                    const isRecent = (Date.now() / 1000) - app.timestamp < 60;
+                    
+                    if (isRecent) {
+                        // Switch to manual tab to show the results
+                        tabs[0].click();
+                        
+                        // Update the status with the generation message
+                        statusDiv.textContent = `${app.message} GitHub: ${app.github_url}`;
+                        
+                        // Display QR code
+                        qrCodeDiv.innerHTML = '';
+                        if (app.qr_code_image) {
+                           const img = document.createElement("img");
+                           img.src = `data:image/png;base64,${app.qr_code_image}`;
+                           img.alt = "QR Code for Generated App";
+                           qrCodeDiv.appendChild(img);
+                        }
+                        
+                        // Display URL
+                        appUrlDiv.innerHTML = '';
+                        if (app.hosted_url_full) {
+                            const urlLink = document.createElement("a");
+                            urlLink.href = app.hosted_url_full;
+                            urlLink.textContent = app.hosted_url_full;
+                            urlLink.target = "_blank";
+                            appUrlDiv.appendChild(document.createTextNode("Access URL: "));
+                            appUrlDiv.appendChild(urlLink);
+                        }
+                        
+                        addLog(`Auto-generated app available: ${app.app_type}`);
+                    }
+                }
+                
             } catch (error) {
                 addLog(`Error checking email status: ${error.message}`, 'error');
                 console.error("Error:", error);

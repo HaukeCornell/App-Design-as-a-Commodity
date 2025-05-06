@@ -463,9 +463,38 @@ def generate_app_route():
         # Call QR Code Generation (Step 006)
         qr_code_base64 = generate_qr_code_base64(hosted_url_full)
 
-        # Capture the most recent 20 log entries
-        recent_logs = application_logs[-20:] if len(application_logs) > 0 else []
-        log_messages = "\n".join([f"[{log['level'].upper()}] {log['message']}" for log in recent_logs])
+        # Get actual model info from app_generator
+        import sys
+        sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+        from src.app_generator import model
+        
+        model_name = "gemini-1.5-pro-latest"
+        if model and hasattr(model, "_model_name"):
+            model_name = model._model_name
+            
+        # Add accurate AI model information
+        ai_info = [
+            f"AI: {model_name}",
+            f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}",
+            f"App ID: {generated_app_details['app_id']}"
+        ]
+        
+        # Capture the most recent logs, filtering out noise
+        filtered_logs = []
+        for log in application_logs:
+            msg = log['message'].lower()
+            # Skip unwanted logs
+            if any(x in msg for x in ['debugger', 'pin:', 'http/1.1', 'api/email-status']):
+                continue
+            filtered_logs.append(log)
+        
+        # Get the recent logs after filtering
+        recent_logs = filtered_logs[-8:] if len(filtered_logs) > 0 else []
+        log_entries = [f"{log['message']}" for log in recent_logs]
+        
+        # Combine AI info with log messages
+        all_logs = ai_info + ["---"] + log_entries
+        log_messages = "\n".join(all_logs)
         
         # Return success response including the full URL
         return jsonify({
@@ -555,11 +584,20 @@ def generate_app_for_payment(app_type: str, payment_amount: float) -> None:
         # Generate QR code for the app
         qr_code_base64 = generate_qr_code_base64(hosted_url_full)
         
-        # Add AI model information
+        # Get actual model info from app_generator
+        import sys
+        sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+        from src.app_generator import model
+        
+        model_name = "gemini-1.5-pro-latest"
+        if model and hasattr(model, "_model_name"):
+            model_name = model._model_name
+        
+        # Add accurate AI model information
         ai_info = [
-            f"AI: Claude 3.7 Sonnet",
-            f"Design Time: ~3 hours",
-            f"Generated on: {time.strftime('%Y-%m-%d %H:%M')}"
+            f"AI: {model_name}",
+            f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}",
+            f"App ID: {generated_app_details['app_id']}"
         ]
         
         # Capture the most recent logs, filtering out noise

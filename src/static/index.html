@@ -340,7 +340,7 @@
             
             <div class="receipt-footer">
                 <p>Generating Your Custom App...</p>
-                <button id="generate-from-payment-btn" style="display: none; margin-top: 10px;">Generate App Now</button>
+                <p style="font-size: 10px;">Please wait while we create your app</p>
             </div>
         </div>
         
@@ -350,7 +350,7 @@
                 <p>Monitoring for Venmo Payments</p>
             </div>
             
-            <div class="log-area" id="email-log" style="height: 150px; overflow-y: auto; font-family: monospace; font-size: 12px; text-align: left; border: none; background: transparent; max-width: initial; margin: 0;">
+            <div class="log-area" id="email-log" style="height: 200px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 11px; text-align: left; border: none; background: transparent; max-width: initial; margin: 0; padding: 5px;">
                 <!-- Email monitoring logs will be displayed here -->
             </div>
             
@@ -361,40 +361,18 @@
     </div>
 
     <script>
-        // Auto-refresh system
-        let lastActivityTime = Date.now();
-        let autoRefreshCount = 0;
-        
-        // Track user activity
-        document.addEventListener('click', function() {
-            lastActivityTime = Date.now();
-        });
-        
-        // Periodic check function (runs every minute)
+        // Simple auto-check for updates every second
         setInterval(function() {
-            // Current time
-            const now = Date.now();
-            
-            // If no activity for 5 minutes, refresh the page
-            if (now - lastActivityTime > 5 * 60 * 1000) {
-                window.location.reload();
-                return;
-            }
-            
-            // Every 10 minutes, refresh the page regardless of activity
-            autoRefreshCount++;
-            if (autoRefreshCount >= 10) {
-                window.location.reload();
-                return;
-            }
-            
-            // Check if the Venmo tab is active, and if so, make sure email monitoring is on
+            // If we're on the Venmo tab, check for app updates
             const venmoTab = document.querySelector('.tab[data-tab="venmo"]');
             if (venmoTab && venmoTab.classList.contains('active')) {
-                // Silently ensure email monitoring is active
+                // Keep email monitoring active
                 startEmailMonitoring();
+                
+                // Check for status updates (this will refresh the UI if there's a new app)
+                checkEmailStatus();
             }
-        }, 60 * 1000); // Check every minute
+        }, 1000); // Check every second for a smooth, real-time feeling
         
         // Tab switching functionality
         const tabs = document.querySelectorAll('.tab');
@@ -625,9 +603,6 @@
         
         // Email monitoring functionality
         const emailLog = document.getElementById("email-log");
-        const paymentInfo = document.getElementById("payment-info");
-        const paymentDetails = document.getElementById("payment-details");
-        const generateFromPaymentBtn = document.getElementById("generate-from-payment-btn");
         
         let lastPayment = null;
         
@@ -665,67 +640,8 @@
         
         // Email monitoring is now started automatically when switching to the Venmo tab
         
-        // Generate app from payment button
-        generateFromPaymentBtn.addEventListener("click", async () => {
-            if (!lastPayment) {
-                addLog("No payment data available", 'error');
-                return;
-            }
-            
-            try {
-                addLog(`Generating app from payment: ${lastPayment.note} ($${lastPayment.amount})`);
-                
-                const response = await fetch("/generate", {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify({
-                        app_type: lastPayment.note,
-                        amount: lastPayment.amount
-                    }),
-                });
-                
-                const result = await response.json();
-                
-                if (!response.ok) {
-                    throw new Error(result.error || "App generation failed.");
-                }
-                
-                // Display generation result
-                addLog(`App generated successfully! App ID: ${result.app_type_received}`);
-                
-                // Switch to manual tab to show the results
-                tabs[0].click();
-                
-                // Update the status and results in the manual tab
-                statusDiv.textContent = `${result.message} GitHub: ${result.github_url}`;
-                
-                // Display QR code
-                qrCodeDiv.innerHTML = '';
-                if (result.qr_code_image) {
-                   const img = document.createElement("img");
-                   img.src = `data:image/png;base64,${result.qr_code_image}`;
-                   img.alt = "QR Code for Generated App";
-                   qrCodeDiv.appendChild(img);
-                }
-                
-                // Display URL
-                appUrlDiv.innerHTML = '';
-                if (result.hosted_url_full) {
-                    const urlLink = document.createElement("a");
-                    urlLink.href = result.hosted_url_full;
-                    urlLink.textContent = result.hosted_url_full;
-                    urlLink.target = "_blank";
-                    appUrlDiv.appendChild(document.createTextNode("Access URL: "));
-                    appUrlDiv.appendChild(urlLink);
-                }
-                
-            } catch (error) {
-                addLog(`Error: ${error.message}`, 'error');
-                console.error("Error:", error);
-            }
-        });
+        // App generation happens automatically when a payment is detected
+        // No manual intervention is needed
         
         // Check current email monitoring status
         async function checkEmailStatus() {
@@ -757,8 +673,42 @@
                     paymentReceipt.style.display = "block";
                     paymentReceipt.classList.add("printing");
                     
-                    // Show generate button
-                    generateFromPaymentBtn.style.display = "block";
+                    // Auto-generate app if it's a new payment
+                    if (!lastPayment || lastPayment.processed !== true) {
+                        // Trigger app generation automatically
+                        setTimeout(async () => {
+                            try {
+                                addLog(`Automatically generating app from payment: ${lastPayment.note} ($${lastPayment.amount})`);
+                                
+                                const response = await fetch("/generate", {
+                                    method: "POST",
+                                    headers: {
+                                        "Content-Type": "application/json",
+                                    },
+                                    body: JSON.stringify({
+                                        app_type: lastPayment.note,
+                                        amount: lastPayment.amount
+                                    }),
+                                });
+                                
+                                const result = await response.json();
+                                
+                                if (!response.ok) {
+                                    throw new Error(result.error || "App generation failed.");
+                                }
+                                
+                                // Mark payment as processed
+                                lastPayment.processed = true;
+                                
+                                // Display generation result
+                                addLog(`App generated successfully! App ID: ${result.app_type_received}`);
+                                
+                            } catch (error) {
+                                addLog(`Error generating app: ${error.message}`, 'error');
+                                console.error("Error:", error);
+                            }
+                        }, 2000); // Short delay to show receipt first
+                    }
                     
                     // Format timestamp for the receipt
                     const timestamp = new Date(lastPayment.timestamp * 1000);
@@ -842,9 +792,12 @@
                                     <div style="margin-top: 10px;"><a href="${app.hosted_url_full}" target="_blank" style="color: #0066cc; text-decoration: underline; font-weight: bold; font-size: 16px; background-color: #e6f7ff; padding: 8px; border-radius: 4px; border: 1px solid #0066cc; display: inline-block;">OPEN GENERATED APP</a></div>
                                 </div>
                                 
-                                <div class="dev-logs" style="margin-top: 15px; border-top: 1px dashed #ccc; padding-top: 10px; font-family: monospace; font-size: 10px; text-align: left; max-height: 150px; overflow-y: auto;">
-                                    <p style="margin: 0; padding: 0; font-weight: bold;">Development Logs:</p>
-                                    <div id="app-logs-${app.timestamp}" style="white-space: pre-wrap; word-break: break-word; color: #333;"></div>
+                                <div class="receipt-item" style="justify-content: center; font-weight: bold; border-top: 1px dashed #000; margin-top: 10px; padding-top: 5px;">
+                                    <span>SYSTEM INFORMATION</span>
+                                </div>
+                                
+                                <div class="dev-logs" style="margin-top: 5px; font-family: monospace; font-size: 10px; text-align: left; max-height: 150px; overflow-y: auto;">
+                                    <pre id="app-logs-${app.timestamp}" style="white-space: pre-wrap; word-break: break-word; color: #333; margin: 0; padding: 0; font-family: 'Courier New', monospace;"></pre>
                                 </div>
                                 
                                 <div class="receipt-footer">
@@ -1015,19 +968,52 @@
             const timestamp = new Date().toLocaleTimeString();
             const logEntry = document.createElement('div');
             logEntry.className = `log-entry ${level}`;
-            logEntry.style.marginBottom = '4px';
+            logEntry.style.marginBottom = '3px';
             logEntry.style.padding = '2px 0';
-            logEntry.style.borderBottom = '1px dotted #eee';
+            logEntry.style.borderBottom = '1px dotted #ccc';
+            logEntry.style.opacity = '0'; // Start transparent for animation
             
-            // Add colored circle for log level
-            let levelColor = '#4CAF50'; // Default green for info
-            if (level === 'warning') levelColor = '#FF9800';
-            if (level === 'error') levelColor = '#F44336';
+            // Add log level indicator
+            let levelMarker = '✓'; // Default for info
+            let levelColor = '#000'; // Black text for most entries
             
-            logEntry.innerHTML = `<span style="color: #555; margin-right: 5px;">${timestamp}</span> ${message}`;
+            if (level === 'warning') {
+                levelMarker = '!';
+                levelColor = '#663c00';
+            }
+            if (level === 'error') {
+                levelMarker = '✗';
+                levelColor = '#9b0000';
+            }
             
+            logEntry.innerHTML = `<span style="color: #555; margin-right: 5px; font-family: monospace;">${timestamp}</span> <span style="color: ${levelColor}; margin-right: 5px;">${levelMarker}</span> ${message}`;
+            
+            // Add to log
             emailLog.appendChild(logEntry);
-            emailLog.scrollTop = emailLog.scrollHeight; // Auto-scroll to bottom
+            
+            // Animate printing effect
+            setTimeout(() => {
+                // Print sound effect
+                const audio = document.createElement('audio');
+                audio.src = 'data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA/+M4wAAAAAAAAAAAAEluZm8AAAAPAAAAAwAAAbAAeHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHiZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZm0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0//////////////////////////////////////////////////////////////////8AAAAATGF2YzU4LjEzAAAAAAAAAAAAAAAAJAYBg//+1DEBvAAAd9AAcxwEGdlkAA3PVIAoCASCQ3UGmBYFgQCgMAYhgQdxhSGMLm4fBwMBgMBgMBgMBgMBgMBgMBgMBgMBgMBgMBgMBgMBgMBgMBg';
+                audio.volume = 0.03; // Very quiet
+                audio.play().catch(e => {});
+                
+                // Fade in with a printing effect
+                let opacity = 0;
+                const fadeIn = setInterval(() => {
+                    opacity += 0.1;
+                    logEntry.style.opacity = opacity;
+                    if (opacity >= 1) {
+                        clearInterval(fadeIn);
+                    }
+                }, 10);
+            }, 10);
+            
+            // Auto-scroll to bottom with slight delay for animation
+            setTimeout(() => {
+                emailLog.scrollTop = emailLog.scrollHeight;
+            }, 150);
         }
     </script>
 </body>

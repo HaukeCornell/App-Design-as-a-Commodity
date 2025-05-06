@@ -18,13 +18,15 @@ This installation consists of:
 
 1. **Transaction Interface**: A Venmo QR code inviting participants to commission a custom app with a simple description and small payment ($0.25 for a quick app, $1.00 for a higher quality app)
 
-2. **Automated Creation Process**: Upon payment detection, an AI system (Gemini 1.5 Pro) transforms the written description into functional code, deploys it to GitHub, and hosts it on the web
+2. **Computational Genesis**: At the moment of transaction confirmation, a dual-tiered artificial intelligence system—Gemini 1.5 Pro for modest contributions ($0.25) and the superior Gemini 2.5 Pro architecture for premium engagements ($1.00)—transmutes verbal description into executable digital artifact, orchestrating an autonomous deployment sequence that manifests the participant's vision within the GitHub repository ecosystem and instantiates it within the broader digital commons of the web
 
 3. **Receipt Generation**: The system produces a receipt-like interface displaying:
    - The transaction details
    - Links to the generated application
    - QR code for immediate access
    - System logs revealing the algorithmic creation process
+
+![Receipt Example](src/project_description/Coffee-counter-generated.png)
 
 ## Interaction Flow
 

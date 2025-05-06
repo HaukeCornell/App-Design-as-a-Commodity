@@ -10,6 +10,8 @@
             padding: 20px; 
             max-width: 900px;
             margin: 0 auto;
+            height: 100%;
+            overflow-y: auto;
         }
         
         label { 
@@ -248,8 +250,7 @@
         
         .tab.active {
             background-color: white;
-            border-bottom: 1px solid white;
-            margin-bottom: -1px;
+            font-weight: bold;
         }
         
         .tab-content {
@@ -257,10 +258,8 @@
             border: 1px solid #ddd;
             border-top: none;
             display: none;
-        }
-        
-        .tab-content.active {
-            display: block;
+            height: auto;
+            overflow-y: visible;
         }
     </style>
 </head>
@@ -272,7 +271,7 @@
         <div class="tab" data-tab="venmo">Venmo Email Monitor</div>
     </div>
     
-    <div id="manual-tab" class="tab-content active">
+    <div id="manual-tab" class="tab-content" style="display: block;">
         <p>Simulate a payment to generate a custom web app using Gemini and push it to GitHub.</p>
         
         <form id="payment-form">
@@ -361,20 +360,51 @@
     </div>
 
     <script>
-        // Tab switching functionality
-        const tabs = document.querySelectorAll('.tab');
-        const tabContents = document.querySelectorAll('.tab-content');
+        // Initialize the page - ensure this runs immediately
+        window.onload = function() {
+            console.log("Initializing tabs");
+            // Show manual tab by default
+            switchTab('manual');
+            // Check email status
+            checkEmailStatus();
+            
+            // Trigger tab switch once more to ensure it's properly displayed
+            setTimeout(() => {
+                console.log("Final tab refresh");
+                switchTab('manual');
+            }, 500);
+        };
         
-        tabs.forEach(tab => {
+        // Simple tab switching functionality
+        function switchTab(tabName) {
+            // Hide all tabs
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.style.display = 'none';
+            });
+            
+            // Show selected tab
+            const selectedTab = document.getElementById(tabName + '-tab');
+            if (selectedTab) {
+                selectedTab.style.display = 'block';
+            }
+            
+            // Update tab buttons
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Highlight active tab button
+            const activeTab = document.querySelector(`.tab[data-tab="${tabName}"]`);
+            if (activeTab) {
+                activeTab.classList.add('active');
+            }
+        }
+        
+        // Set up tab click events
+        document.querySelectorAll('.tab').forEach(tab => {
             tab.addEventListener('click', () => {
-                // Remove active class from all tabs and contents
-                tabs.forEach(t => t.classList.remove('active'));
-                tabContents.forEach(c => c.classList.remove('active'));
-                
-                // Add active class to clicked tab and corresponding content
-                tab.classList.add('active');
                 const tabName = tab.getAttribute('data-tab');
-                document.getElementById(`${tabName}-tab`).classList.add('active');
+                switchTab(tabName);
             });
         });
         
@@ -435,7 +465,7 @@
                 // Create a receipt for the manual generation too
                 // Switch to Venmo tab
                 setTimeout(() => {
-                    tabs[1].click();
+                    switchTab('venmo');
                     
                     // Create the receipt element if it doesn't exist
                     const generatedReceiptExists = document.getElementById('generated-app-receipt');
@@ -515,7 +545,8 @@
                             // Sound not critical, just continue silently
                         }
                         
-                        // Scroll to the bottom to ensure the receipt is visible
+                        // Scroll the venmo tab to the bottom to ensure the receipt is visible
+                        const venmoTab = document.getElementById('venmo-tab');
                         venmoTab.scrollTop = venmoTab.scrollHeight;
                     }
                 }, 500);
@@ -660,7 +691,7 @@
                 addLog(`App generated successfully! App ID: ${result.app_type_received}`);
                 
                 // Switch to manual tab to show the results
-                tabs[0].click();
+                switchTab('manual');
                 
                 // Update the status and results in the manual tab
                 statusDiv.textContent = `${result.message} GitHub: ${result.github_url}`;
@@ -838,10 +869,19 @@
                             } catch (e) {
                                 // Sound not critical, just continue silently
                             }
+                            
+                            // Scroll the venmo tab to the bottom to ensure the receipt is visible
+                            setTimeout(() => {
+                                const venmoTab = document.getElementById('venmo-tab');
+                                if (venmoTab) {
+                                    venmoTab.scrollTop = venmoTab.scrollHeight;
+                                    document.documentElement.scrollTop = document.documentElement.scrollHeight;
+                                }
+                            }, 100);
                         }
                         
                         // Also update the original manual results display for consistency
-                        tabs[0].click();
+                        switchTab('manual');
                         
                         // Update the status with the generation message
                         statusDiv.textContent = `${app.message} GitHub: ${app.github_url}`;
@@ -870,7 +910,13 @@
                         
                         // Switch back to the Venmo tab to show the receipt
                         setTimeout(() => {
-                            tabs[1].click();
+                            switchTab('venmo');
+                            
+                            // Scroll to the bottom to ensure receipt is visible
+                            const venmoTabContent = document.getElementById('venmo-tab');
+                            if (venmoTabContent) {
+                                venmoTabContent.scrollTop = venmoTabContent.scrollHeight;
+                            }
                         }, 2000);
                     }
                 }
@@ -911,9 +957,17 @@
                 // Show a message to encourage entering an app description
                 const instructionsReceipt = document.getElementById('instructions-receipt');
                 instructionsReceipt.style.border = '2px solid #2196F3';
+                
+                // Make sure we're on the Venmo tab and scrolled to see instructions
+                switchTab('venmo');
                 setTimeout(() => {
+                    const venmoTab = document.getElementById('venmo-tab');
+                    if (venmoTab) {
+                        venmoTab.scrollTop = venmoTab.scrollHeight;
+                        document.documentElement.scrollTop = document.documentElement.scrollHeight;
+                    }
                     instructionsReceipt.style.border = '1px solid #ddd';
-                }, 3000);
+                }, 1000);
                 
             } catch (error) {
                 console.error('Error notifying scan:', error);

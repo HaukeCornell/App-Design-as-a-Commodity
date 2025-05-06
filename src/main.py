@@ -285,9 +285,12 @@ root_logger = logging.getLogger()
 root_logger.setLevel(logging.INFO)
 root_logger.addHandler(ApplicationLogHandler())
 
-# Capture logs from our modules
+# Configure logging levels for verbose modules
 for logger_name in ["venmo_email", "venmo_qr"]:
     logger = logging.getLogger(logger_name)
+    # Set to WARNING to reduce console output - use DEBUG for development
+    logger.setLevel(logging.WARNING)
+    # Still capture important logs for the UI
     logger.addHandler(ApplicationLogHandler())
 
 # --- Routes --- 
@@ -296,6 +299,24 @@ for logger_name in ["venmo_email", "venmo_qr"]:
 def index():
     """Serve the main HTML page."""
     return send_from_directory(app.static_folder, "index.html")
+    
+@app.route("/api/venmo-scanned")
+def venmo_scanned():
+    """Handle notification that someone scanned the Venmo QR code."""
+    # Log the scan
+    add_log("Someone scanned the Venmo QR code", "info")
+    
+    # The actual payment logic happens in the email monitor
+    # This endpoint is just for notification that someone scanned the QR
+    
+    return jsonify({
+        "message": "Scan recorded. Check your Venmo app to complete payment.",
+        "instructions": "In the payment note, describe the app you want to have built.",
+        "pricing": {
+            "quick_app": "$0.25",
+            "high_quality_app": "$1.00"
+        }
+    })
     
 @app.route("/api/email-monitor", methods=["POST"])
 def toggle_email_monitoring():

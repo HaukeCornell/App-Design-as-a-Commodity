@@ -51,11 +51,48 @@ class VenmoQRManager:
             Base64-encoded PNG image of the QR code
         """
         try:
-            # Read the static QR code file
-            with open(self.qr_code_path, "rb") as f:
-                img_data = f.read()
-                img_base64 = base64.b64encode(img_data).decode("utf-8")
-                logger.info("Successfully loaded Venmo QR code image")
+            # Read the static QR code file if it exists
+            if os.path.exists(self.qr_code_path):
+                with open(self.qr_code_path, "rb") as f:
+                    img_data = f.read()
+                    img_base64 = base64.b64encode(img_data).decode("utf-8")
+                    logger.info("Successfully loaded Venmo QR code image")
+                    return img_base64
+            else:
+                # The file doesn't exist, so generate a QR code for the Venmo URL
+                logger.warning("Static QR code not found, dynamically generating one")
+                import qrcode
+                import io
+                
+                # Direct Venmo URL - this is the URL from your shared QR code
+                venmo_url = VENMO_CONFIG.get("venmo_direct_url", 
+                    "https://www.paypal.com/qrcodes/venmocs/4445b00a-757b-4832-836e-d53d3c37c0c5?created=1746487649.347355&printed=1")
+                
+                # Create QR code
+                qr = qrcode.QRCode(
+                    version=1,
+                    error_correction=qrcode.constants.ERROR_CORRECT_L,
+                    box_size=10,
+                    border=4,
+                )
+                qr.add_data(venmo_url)
+                qr.make(fit=True)
+                img = qr.make_image(fill_color="black", back_color="white")
+                
+                # Save to buffer and convert to base64
+                buffer = io.BytesIO()
+                img.save(buffer, format="PNG")
+                buffer.seek(0)
+                img_base64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
+                
+                # Save for future use
+                try:
+                    with open(self.qr_code_path, "wb") as f:
+                        f.write(buffer.getvalue())
+                    logger.info(f"Saved generated QR code to {self.qr_code_path}")
+                except Exception as e:
+                    logger.error(f"Failed to save QR code: {e}")
+                
                 return img_base64
         except Exception as e:
             logger.error(f"Error loading Venmo QR code image: {e}")

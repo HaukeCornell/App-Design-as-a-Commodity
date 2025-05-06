@@ -34,12 +34,17 @@ EMAIL_CONFIG = {
 # Venmo Configuration
 VENMO_CONFIG = {
     "venmo_profile_url": os.getenv("VENMO_PROFILE_URL", "https://account.venmo.com/u/sandhaus"),
+    # Direct URL to Venmo QR code (as provided) - this is used for the QR code generation
+    "venmo_direct_url": os.getenv("VENMO_DIRECT_URL", "https://www.paypal.com/qrcodes/venmocs/4445b00a-757b-4832-836e-d53d3c37c0c5?created=1746487649.347355&printed=1"),
     "min_amount": float(os.getenv("VENMO_MIN_AMOUNT", "0.25")),
     "max_amount": float(os.getenv("VENMO_MAX_AMOUNT", "2.00")),
     
     # Payment processing configuration
     "payment_timeout": int(os.getenv("PAYMENT_TIMEOUT", "600")),  # seconds (10 minutes)
     "allowed_payment_methods": ["Venmo"],
+    
+    # Server notification endpoint for when QR code is scanned
+    "notify_url": os.getenv("NOTIFY_URL", "/api/venmo-scanned"),
 }
 
 # Session configuration for QR code scanning and payment tracking

@@ -124,9 +124,8 @@ class EmailProcessor:
             body_html = email_data.get('body_html', '')
             subject = email_data.get('subject', '')
             
-            # Debug log the email content
-            logger.info(f"Parsing Venmo email with subject: {subject}")
-            logger.info(f"Email body (first 500 chars): {body_text[:500]}...")
+            # Minimal logging
+            logger.debug(f"Parsing Venmo email: {subject[:30]}{'...' if len(subject) > 30 else ''}")
             
             # Make sure we have some content to parse
             if not (body_text or body_html or subject):
@@ -142,9 +141,9 @@ class EmailProcessor:
                 'payment_id': None
             }
             
-            # Try to extract the entire email content for debugging
-            logger.info(f"Full subject: {subject}")
-            logger.info(f"Full body length: {len(body_text)} chars")
+            # Log minimal information
+            logger.debug(f"Processing email with subject: {subject[:30]}{'...' if len(subject) > 30 else ''}")
+            logger.debug(f"Email body length: {len(body_text)} chars")
             
             # Try to extract payment amount from subject first, then body
             # Example pattern: "John Doe paid you $5.00"

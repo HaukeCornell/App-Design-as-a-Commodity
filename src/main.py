@@ -529,9 +529,18 @@ def generate_app_for_payment(app_type: str, payment_amount: float) -> None:
         # Generate QR code for the app
         qr_code_base64 = generate_qr_code_base64(hosted_url_full)
         
-        # Capture the most recent 20 log entries 
-        recent_logs = application_logs[-20:] if len(application_logs) > 0 else []
-        log_messages = "\n".join([f"[{log['level'].upper()}] {log['message']}" for log in recent_logs])
+        # Capture the most recent 20 log entries, filtering out noise
+        filtered_logs = []
+        for log in application_logs:
+            msg = log['message'].lower()
+            # Skip unwanted logs
+            if any(x in msg for x in ['debugger', 'pin:', 'http/1.1', 'api/email-status']):
+                continue
+            filtered_logs.append(log)
+        
+        # Get the most recent logs after filtering
+        recent_logs = filtered_logs[-10:] if len(filtered_logs) > 0 else []
+        log_messages = "\n".join([f"{log['message']}" for log in recent_logs])
         
         # Store the generated app info for access by the UI
         venmo_qr_manager.last_generated_app = {

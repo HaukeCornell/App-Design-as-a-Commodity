@@ -325,18 +325,7 @@
             </div>
         </div>
         
-        <div class="toggle-container" style="max-width: 300px; margin: 20px auto;">
-            <h3>Email Monitoring</h3>
-            <label class="toggle-switch">
-                <input type="checkbox" id="monitor-toggle">
-                <span class="slider"></span>
-            </label>
-            <div class="email-status">Status: <span id="monitor-status">Inactive</span></div>
-            
-            <div style="margin-top: 15px; text-align: center;">
-                <button id="check-now-btn">Check Emails Now</button>
-            </div>
-        </div>
+        <!-- Email monitoring will be enabled automatically -->
         
         <!-- Payment Receipt (displays when payment is detected) -->
         <div class="receipt-paper printing" id="payment-receipt" style="display: none;">
@@ -355,8 +344,19 @@
             </div>
         </div>
         
-        <div class="log-area" id="email-log" style="margin-top: 20px; max-width: 500px; margin: 20px auto;">
-            <!-- Email monitoring logs will be displayed here -->
+        <div class="receipt-paper" style="margin-top: 30px;">
+            <div class="receipt-header">
+                <h3>SYSTEM LOGS</h3>
+                <p>Monitoring for Venmo Payments</p>
+            </div>
+            
+            <div class="log-area" id="email-log" style="height: 150px; overflow-y: auto; font-family: monospace; font-size: 12px; text-align: left; border: none; background: transparent; max-width: initial; margin: 0;">
+                <!-- Email monitoring logs will be displayed here -->
+            </div>
+            
+            <div class="receipt-footer">
+                <p>Email monitoring is automatic</p>
+            </div>
         </div>
     </div>
 
@@ -375,8 +375,57 @@
                 tab.classList.add('active');
                 const tabName = tab.getAttribute('data-tab');
                 document.getElementById(`${tabName}-tab`).classList.add('active');
+                
+                // Auto-start email monitoring when switching to the Venmo tab
+                if (tabName === 'venmo') {
+                    // Start email monitoring if not already active
+                    startEmailMonitoring();
+                }
             });
         });
+        
+        // Function to ensure email monitoring is enabled
+        async function startEmailMonitoring() {
+            try {
+                // First check the current status
+                const response = await fetch("/api/email-status");
+                const result = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error("Failed to get email status.");
+                }
+                
+                const isActive = result.email_monitoring;
+                
+                // Only need to enable if not already active
+                if (!isActive) {
+                    addLog("Starting email monitoring automatically...");
+                    
+                    const response = await fetch("/api/email-monitor", {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                        },
+                        body: JSON.stringify({ enabled: true }),
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (!response.ok) {
+                        throw new Error(result.error || "Failed to start email monitoring.");
+                    }
+                    
+                    addLog("Email monitoring started automatically");
+                    
+                    // Start checking for status updates
+                    startStatusUpdates();
+                }
+                
+            } catch (error) {
+                addLog(`Error starting email monitoring: ${error.message}`, 'error');
+                console.error("Error:", error);
+            }
+        }
         
         // Manual app generation form
         const form = document.getElementById("payment-form");
@@ -540,9 +589,6 @@
         });
         
         // Email monitoring functionality
-        const monitorToggle = document.getElementById("monitor-toggle");
-        const monitorStatus = document.getElementById("monitor-status");
-        const checkNowBtn = document.getElementById("check-now-btn");
         const emailLog = document.getElementById("email-log");
         const paymentInfo = document.getElementById("payment-info");
         const paymentDetails = document.getElementById("payment-details");
@@ -582,65 +628,7 @@
             }
         }
         
-        // Toggle email monitoring
-        monitorToggle.addEventListener("change", async () => {
-            try {
-                const enabled = monitorToggle.checked;
-                
-                const response = await fetch("/api/email-monitor", {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify({ enabled }),
-                });
-                
-                const result = await response.json();
-                
-                if (!response.ok) {
-                    throw new Error(result.error || `Failed to ${enabled ? 'start' : 'stop'} email monitoring.`);
-                }
-                
-                monitorStatus.textContent = enabled ? "Active" : "Inactive";
-                addLog(`Email monitoring ${enabled ? 'started' : 'stopped'}`);
-                
-                // Start checking for status updates if monitoring is enabled
-                if (enabled) {
-                    startStatusUpdates();
-                }
-                
-            } catch (error) {
-                addLog(`Error: ${error.message}`, 'error');
-                console.error("Error:", error);
-                monitorToggle.checked = !monitorToggle.checked; // Revert toggle state
-            }
-        });
-        
-        // Check for emails now button
-        checkNowBtn.addEventListener("click", async () => {
-            try {
-                addLog("Checking for new emails...");
-                
-                const response = await fetch("/api/check-emails", {
-                    method: "POST",
-                });
-                
-                const result = await response.json();
-                
-                if (!response.ok) {
-                    throw new Error(result.error || "Failed to check emails.");
-                }
-                
-                addLog(`Email check completed. Found ${result.payments_found} new payment(s).`);
-                
-                // Refresh status immediately to see if we got any payments
-                checkEmailStatus();
-                
-            } catch (error) {
-                addLog(`Error: ${error.message}`, 'error');
-                console.error("Error:", error);
-            }
-        });
+        // Email monitoring is now started automatically when switching to the Venmo tab
         
         // Generate app from payment button
         generateFromPaymentBtn.addEventListener("click", async () => {
@@ -715,8 +703,6 @@
                 }
                 
                 const isActive = result.email_monitoring;
-                monitorToggle.checked = isActive;
-                monitorStatus.textContent = isActive ? "Active" : "Inactive";
                 
                 // Update Venmo QR code display
                 if (result.venmo_qr_code && result.venmo_profile_url) {
@@ -911,6 +897,34 @@
         function startStatusUpdates() {
             // Check status every 10 seconds
             setInterval(checkEmailStatus, 10000);
+            
+            // Also periodically check for new emails (every 30 seconds)
+            setInterval(checkForNewEmails, 30000);
+        }
+        
+        // Function to check for new emails
+        async function checkForNewEmails() {
+            try {
+                const response = await fetch("/api/check-emails", {
+                    method: "POST",
+                });
+                
+                const result = await response.json();
+                
+                if (!response.ok) {
+                    console.error("Failed to check emails:", result.error);
+                    return;
+                }
+                
+                if (result.payments_found > 0) {
+                    addLog(`Found ${result.payments_found} new payment(s)!`);
+                    // Refresh status immediately to see if we got any payments
+                    checkEmailStatus();
+                }
+                
+            } catch (error) {
+                console.error("Error checking emails:", error);
+            }
         }
         
         // Function to notify the server when QR code is scanned
@@ -947,11 +961,35 @@
         }
         
         // Add log message to the log area
+        // Initialize the page and add default log message
+        window.addEventListener('DOMContentLoaded', function() {
+            // Add initial log message
+            if (emailLog && emailLog.childElementCount === 0) {
+                addLog("System ready. Waiting for Venmo payments...");
+            }
+            
+            // Check if the Venmo tab is already active
+            const venmoTab = document.querySelector('.tab[data-tab="venmo"]');
+            if (venmoTab && venmoTab.classList.contains('active')) {
+                // Start email monitoring immediately
+                setTimeout(startEmailMonitoring, 500);
+            }
+        });
+        
         function addLog(message, level = 'info') {
             const timestamp = new Date().toLocaleTimeString();
             const logEntry = document.createElement('div');
             logEntry.className = `log-entry ${level}`;
-            logEntry.innerHTML = `<span class="timestamp">${timestamp}</span> ${message}`;
+            logEntry.style.marginBottom = '4px';
+            logEntry.style.padding = '2px 0';
+            logEntry.style.borderBottom = '1px dotted #eee';
+            
+            // Add colored circle for log level
+            let levelColor = '#4CAF50'; // Default green for info
+            if (level === 'warning') levelColor = '#FF9800';
+            if (level === 'error') levelColor = '#F44336';
+            
+            logEntry.innerHTML = `<span style="color: #555; margin-right: 5px;">${timestamp}</span> ${message}`;
             
             emailLog.appendChild(logEntry);
             emailLog.scrollTop = emailLog.scrollHeight; // Auto-scroll to bottom

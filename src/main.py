@@ -24,7 +24,7 @@ from src.app_generator import generate_app_files
 # Import Venmo related modules
 from src.venmo_email import email_processor, init_email_monitoring
 from src.venmo_qr import venmo_qr_manager
-from src.venmo_config import VENMO_CONFIG
+from src.venmo_config import VENMO_CONFIG, EMAIL_CONFIG
 
 # --- App Initialization ---
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -39,8 +39,21 @@ def init_venmo_system():
     # This prevents using localhost in production
     venmo_qr_manager.set_base_url(None)
     
+    # Display email configuration status
+    if EMAIL_CONFIG["email_password"]:
+        print(f"Email monitoring configured for: {EMAIL_CONFIG['email_address']}")
+    else:
+        print("WARNING: Email password not set. Email monitoring will not work correctly.")
+    
     # Register the payment callback handler
     email_processor.register_callback("default", venmo_qr_manager.handle_payment)
+    
+    # Add the QR code path to logs for debugging
+    qr_path = venmo_qr_manager.qr_code_path
+    if os.path.exists(qr_path):
+        print(f"Venmo QR code found at: {qr_path}")
+    else:
+        print(f"WARNING: Venmo QR code not found at: {qr_path}")
     
     # Start email monitoring in the background
     init_email_monitoring()
@@ -235,7 +248,6 @@ def generate_qr_code_base64(url: str) -> str:
 # Store logs in memory for display
 application_logs = []
 log_id_counter = 0
-last_payment = None
 
 def add_log(message, level="info"):
     """Add a log entry to the application logs."""
@@ -310,13 +322,18 @@ def toggle_email_monitoring():
 @app.route("/api/email-status")
 def get_email_status():
     """Get the status of email monitoring and last payment."""
-    global last_payment
+    # Use the venmo_qr_manager's last_payment
+    last_payment = venmo_qr_manager.last_payment
+    last_generated_app = venmo_qr_manager.last_generated_app
     
     # Get current system status
     status = {
         "email_monitoring": email_processor.monitoring_active,
         "last_payment": last_payment,
-        "timestamp": time.time()
+        "last_generated_app": last_generated_app,
+        "timestamp": time.time(),
+        "venmo_profile_url": VENMO_CONFIG["venmo_profile_url"],
+        "venmo_qr_code": venmo_qr_manager.get_venmo_qr_code()
     }
     
     return jsonify(status)
@@ -332,13 +349,16 @@ def check_emails_now():
         payments = email_processor.fetch_recent_venmo_emails()
         
         # Process any found payments
+        payment_count = 0
         for payment in payments:
-            # Register with a default session ID
-            email_processor._process_payment(payment)
+            # Process the payment through the venmo_qr_manager
+            if venmo_qr_manager.handle_payment(payment):
+                payment_count += 1
+                add_log(f"Processed payment: ${payment.get('amount')} for {payment.get('note')}", "info")
             
         return jsonify({
             "message": "Email check completed",
-            "payments_found": len(payments)
+            "payments_found": payment_count
         })
     except Exception as e:
         add_log(f"Error checking emails: {e}", "error")
@@ -445,6 +465,63 @@ def serve_generated_app(app_id):
         
     return send_from_directory(app_directory, "index.html")
 
+# Function to generate app from payment data
+def generate_app_for_payment(app_type: str, payment_amount: float) -> None:
+    """
+    Generate an app based on a received payment.
+    Called automatically when a payment is received through email monitoring.
+    
+    Args:
+        app_type: The type of app to generate (from the payment note)
+        payment_amount: The amount of the payment
+    """
+    try:
+        add_log(f"Starting app generation for payment: {app_type} (${payment_amount})", "info")
+        
+        # Call App Generation Logic
+        generated_app_details = generate_app_files(app_type, payment_amount)
+        
+        if not generated_app_details:
+            add_log(f"Failed to generate app for payment: {app_type}", "error")
+            return
+        
+        # Call GitHub Integration
+        github_url = push_to_github_real(
+            generated_app_details["path"], 
+            generated_app_details["app_id"],
+            generated_app_details["app_type"]
+        )
+        
+        # Generate base URL for hosted app
+        base_url = os.getenv("EXTERNAL_HOST", "http://localhost:5002")
+        if not base_url.startswith(('http://', 'https://')):
+            base_url = f"http://{base_url}"
+            
+        hosted_url_relative = f"/apps/{generated_app_details['app_id']}/"
+        hosted_url_full = f"{base_url.strip('/')}{hosted_url_relative}"
+        
+        # Generate QR code for the app
+        qr_code_base64 = generate_qr_code_base64(hosted_url_full)
+        
+        # Store the generated app info for access by the UI
+        venmo_qr_manager.last_generated_app = {
+            "app_id": generated_app_details["app_id"],
+            "app_type": generated_app_details["app_type"],
+            "tier": generated_app_details["tier"],
+            "hosted_url_full": hosted_url_full,
+            "github_url": github_url,
+            "qr_code_image": qr_code_base64,
+            "timestamp": time.time()
+        }
+        
+        # Log the success
+        add_log(f"App generation completed: {app_type} (${payment_amount})", "info")
+        add_log(f"App available at: {hosted_url_full}", "info")
+        add_log(f"GitHub repository: {github_url}", "info")
+        
+    except Exception as e:
+        add_log(f"Error generating app from payment: {e}", "error")
+
 # --- Main Execution ---
 if __name__ == "__main__":
     # Initialize the Venmo payment system
@@ -453,4 +530,4 @@ if __name__ == "__main__":
     # Use port 5002 for local testing
     port = int(os.getenv("PORT", 5002))
     # Set debug=True for development
-    app.run(debug=True, host="0.0.0.0", port=port) 
+    app.run(debug=True, host="0.0.0.0", port=port)

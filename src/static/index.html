@@ -219,14 +219,25 @@
             </div>
         </div>
         
-        <div id="payment-info" class="payment-log">
-            <h3>Last Payment Detected</h3>
-            <div id="payment-details">No payments detected yet.</div>
+        <div style="margin-top: 20px; display: flex; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 250px; margin-right: 20px;">
+                <h3>Venmo Payment QR Code</h3>
+                <div id="venmo-qr-container" style="margin-bottom: 15px;"></div>
+                <p>Scan this code or visit <a id="venmo-profile-link" href="#" target="_blank">Venmo profile</a> to make a payment.</p>
+                <p>Be sure to include your app description in the payment note.</p>
+            </div>
             
-            <button id="generate-from-payment-btn" style="display: none; margin-top: 10px;">Generate App from Payment</button>
+            <div style="flex: 1; min-width: 250px;">
+                <div id="payment-info" class="payment-log">
+                    <h3>Last Payment Detected</h3>
+                    <div id="payment-details">No payments detected yet.</div>
+                    
+                    <button id="generate-from-payment-btn" style="display: none; margin-top: 10px;">Generate App from Payment</button>
+                </div>
+            </div>
         </div>
         
-        <div class="log-area" id="email-log">
+        <div class="log-area" id="email-log" style="margin-top: 20px;">
             <!-- Email monitoring logs will be displayed here -->
         </div>
     </div>
@@ -322,6 +333,29 @@
         
         // Check initial status on page load
         checkEmailStatus();
+        
+        // Function to update the Venmo QR code display
+        function updateVenmoQRCode(qrCodeBase64, profileUrl) {
+            const venmoQRContainer = document.getElementById("venmo-qr-container");
+            const venmoProfileLink = document.getElementById("venmo-profile-link");
+            
+            // Update the QR code image
+            if (qrCodeBase64) {
+                venmoQRContainer.innerHTML = "";
+                const img = document.createElement("img");
+                img.src = `data:image/png;base64,${qrCodeBase64}`;
+                img.alt = "Venmo QR Code";
+                img.style.maxWidth = "200px";
+                img.style.border = "1px solid #ccc";
+                venmoQRContainer.appendChild(img);
+            }
+            
+            // Update the profile link
+            if (profileUrl) {
+                venmoProfileLink.href = profileUrl;
+                venmoProfileLink.textContent = "Venmo profile";
+            }
+        }
         
         // Toggle email monitoring
         monitorToggle.addEventListener("change", async () => {
@@ -458,6 +492,15 @@
                 const isActive = result.email_monitoring;
                 monitorToggle.checked = isActive;
                 monitorStatus.textContent = isActive ? "Active" : "Inactive";
+                
+                // Update Venmo QR code display
+                if (result.venmo_qr_code && result.venmo_profile_url) {
+                    updateVenmoQRCode(result.venmo_qr_code, result.venmo_profile_url);
+                    
+                    if (isActive) {
+                        addLog("Email monitoring active. QR code ready for payments.");
+                    }
+                }
                 
                 // Update last payment info if available
                 if (result.last_payment) {

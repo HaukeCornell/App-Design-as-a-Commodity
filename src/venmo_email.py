@@ -243,17 +243,111 @@ class EmailProcessor:
                     note_found = True
                     logger.info(f"Extracted potential app description from line: '{possible_note}'")
             
-            # If we still don't have a note, use a fallback
+            # If we still don't have a note, try targeted HTML extraction based on known structure
             if not note_found or not payment_data['note'] or payment_data['note'].strip() == "":
-                # Check if the email was from the example with "A cake visualization"
-                if ("cake" in entire_body.lower() or 
-                    "visualization" in entire_body.lower() or
-                    "visual" in entire_body.lower()):
-                    payment_data['note'] = "A cake visualization"
-                    logger.info("Detected specific 'cake visualization' request")
-                else:
-                    payment_data['note'] = "calculator"
-                    logger.warning("No note found in payment, defaulting to 'calculator'")
+                # Try to extract from HTML body if available (specifically targeting Venmo emails)
+                if body_html:
+                    # Look for patterns in the HTML structure that typically contain the payment note
+                    # The selector indicates it might be in a paragraph within a specific structure
+                    
+                    # 1. Try the specific pattern from the CSS selector - looking for specific structure
+                    # The selector suggests the note is in a div with class card-container, in a content-container div,
+                    # in a <p> that's the 4th child
+                    card_containers = re.findall(r'<div class="card-container[^"]*">(.*?)</div>', body_html, re.DOTALL)
+                    for card in card_containers:
+                        content_containers = re.findall(r'<div class="content-container[^"]*">(.*?)</div>', card, re.DOTALL)
+                        for container in content_containers:
+                            # Look for paragraphs
+                            paragraphs = re.findall(r'<p[^>]*>(.*?)</p>', container, re.DOTALL)
+                            # Fourth paragraph is specifically what we want (from the :nth-child(4) in the selector)
+                            if len(paragraphs) >= 4:
+                                note_text = paragraphs[3]  # 0-indexed, so 3 is the 4th paragraph
+                                # Clean HTML tags
+                                note_text = re.sub(r'<[^>]+>', '', note_text).strip()
+                                if note_text and len(note_text) > 3:
+                                    payment_data['note'] = note_text
+                                    logger.info(f"Extracted app description from card/content structure: '{note_text}'")
+                                    note_found = True
+                                    break
+                        if note_found:
+                            break
+                    
+                    # 2. Fallback: Try to find paragraphs directly within content containers
+                    if not note_found:
+                        content_containers = re.findall(r'<div class="content-container[^"]*">(.*?)</div>', body_html, re.DOTALL)
+                        for container in content_containers:
+                            # Look for paragraphs that might contain our note
+                            paragraphs = re.findall(r'<p[^>]*>(.*?)</p>', container, re.DOTALL)
+                            # Fourth paragraph is often the note based on the selector (:nth-child(4))
+                            if len(paragraphs) >= 4:
+                                note_text = paragraphs[3]  # 0-indexed, so 3 is the 4th paragraph
+                                # Clean HTML tags
+                                note_text = re.sub(r'<[^>]+>', '', note_text).strip()
+                                if note_text and len(note_text) > 3:
+                                    payment_data['note'] = note_text
+                                    logger.info(f"Extracted app description from content-container: '{note_text}'")
+                                    note_found = True
+                                    break
+                    
+                    # 3. Try to find any paragraph within a table structure (from the selector hints)
+                    if not note_found:
+                        table_cells = re.findall(r'<t[dh][^>]*>(.*?)</t[dh]>', body_html, re.DOTALL)
+                        for cell in table_cells:
+                            paragraphs = re.findall(r'<p[^>]*>(.*?)</p>', cell, re.DOTALL)
+                            for para in paragraphs:
+                                # Clean HTML tags
+                                note_text = re.sub(r'<[^>]+>', '', para).strip()
+                                # Look for substantive text that's likely to be a note 
+                                if note_text and len(note_text) > 10 and "$" not in note_text and "venmo" not in note_text.lower():
+                                    payment_data['note'] = note_text
+                                    logger.info(f"Extracted app description from table cell: '{note_text}'")
+                                    note_found = True
+                                    break
+                            if note_found:
+                                break
+                
+                # If still not found, try the text-based approach 
+                if not note_found:
+                    # Examine the email body more thoroughly to find any potential app description
+                    # Look for the longest meaningful string that could be an app description
+                    potential_notes = []
+                    
+                    # Split by lines and look for text that's not part of standard Venmo templates
+                    lines = body_text.strip().split('\n')
+                    for line in lines:
+                        line = line.strip()
+                        # Skip empty lines or lines that are likely part of the Venmo template
+                        if (len(line) < 4 or "venmo" in line.lower() or 
+                            "paid you" in line.lower() or "payment" in line.lower() or
+                            "$" in line or "https://" in line or "view" in line.lower() or
+                            "from:" in line.lower() or "to:" in line.lower()):
+                            continue
+                        
+                        # This might be a description
+                        potential_notes.append(line)
+                    
+                    # If we found any potential descriptions, use the longest one
+                    if potential_notes:
+                        # Sort by length to get the most likely description (longer text)
+                        potential_notes.sort(key=len, reverse=True)
+                        payment_data['note'] = potential_notes[0]
+                        logger.info(f"Extracted app description from email body: '{payment_data['note']}'")
+                        note_found = True
+                    else:
+                        # Last resort - look for quoted text anywhere in the email
+                        quote_matches = re.findall(r'"([^"]{5,})"', entire_body)  # At least 5 chars long
+                        if quote_matches:
+                            payment_data['note'] = quote_matches[0]
+                            logger.info(f"Extracted app description from quotes: '{payment_data['note']}'")
+                            note_found = True
+                        else:
+                            # If all else fails, use a generic app type
+                            payment_data['note'] = "Generic App"
+                            logger.warning("No specific app description found in payment, using generic name")
+                    
+            # Store the full email body in the payment data for further processing
+            payment_data['body_text'] = body_text
+            payment_data['body_html'] = body_html
                 
             # Extract payment ID (if available)
             payment_id_pattern = r'Payment ID:\s*(\w+)'
@@ -556,8 +650,7 @@ class EmailProcessor:
                             logger.info(f"Processing new Venmo payment: ${payment['amount']} with note: {payment['note']}")
                             
                             # Call the registered callbacks for any waiting sessions
-                            # We'll match the payment to the appropriate session based on the note
-                            # or other identifying information in the payment
+                            # This will now utilize the venmo_qr_manager to handle payments
                             self._process_payment(payment)
                             
                     except Exception as e:

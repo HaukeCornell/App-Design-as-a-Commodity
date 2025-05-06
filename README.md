@@ -52,7 +52,7 @@ The thermal printer's gentle hum punctuates this meditation, generating a tangib
 
 The installation employs:
 - Python Flask backend with real-time email monitoring
-- Gemini 1.5 Pro for code generation
+- Gemini 1.5 and 2.5 Pro for code generation
 - GitHub API integration for repository creation
 - Thermal-printer style UI for receipts
 - QR code generation for app access

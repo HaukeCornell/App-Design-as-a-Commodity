@@ -33,8 +33,8 @@ else:
         print(f"Error configuring Gemini API: {e}")
         model = None # Set model to None if configuration fails
 
-def generate_code_with_gemini(app_type: str, tier: str) -> str | None:
-    """Generates HTML/CSS/JS code using Gemini based on app type and tier."""
+def generate_code_with_gemini(app_type: str, tier: str, readme_content: str) -> str | None:
+    """Generates HTML/CSS/JS code using Gemini based on app type, tier, and README content."""
     if not model:
         print("Gemini model not configured or configuration failed. Cannot generate code.")
         return None
@@ -43,12 +43,14 @@ def generate_code_with_gemini(app_type: str, tier: str) -> str | None:
     model_to_use = genai.GenerativeModel("gemini-2.5-pro-preview-03-25") if tier == "high" else genai.GenerativeModel("gemini-2.5-flash-preview-04-17")
     
     prompt = (
-        f"Create a complete, single-file HTML web application for: \"{app_type}\".\n"
+        f"Create a complete, single-file HTML web application based on the following README.md content:\n\n"
+        f"--- README START ---\n{readme_content}\n--- README END ---\n\n"
+        f"The application should be for: \"{app_type}\".\n"
         f"Requirements:\n"
         f"- The entire application (HTML structure, CSS styles, and JavaScript logic) MUST be contained within a single HTML file.\n"
         f"- CSS should be included in a `<style>` tag within the `<head>`.\n"
         f"- JavaScript should be included in a `<script>` tag, preferably at the end of the `<body>`.\n"
-        f"- The application must be functional and ready to use.\n"
+        f"- The application must be functional, ready to use, and accurately reflect the description and features outlined in the provided README.\n"
         f"- Your response MUST contain ONLY the raw HTML code, starting precisely with `<!DOCTYPE html>` and ending precisely with `</html>`.\n"
         f"- Do NOT include any markdown formatting (like ```html), comments, explanations, or any text outside the HTML code itself."
     )
@@ -149,30 +151,37 @@ def generate_app_files(app_type: str, amount: float) -> dict | None:
     # Determine tier based on amount
     tier = "high" if amount >= 5.0 else "low"
 
-    # Generate code using Gemini
-    generated_html = generate_code_with_gemini(app_type, tier)
+    # Generate README.md using Gemini Flash first
+    generated_readme = generate_readme_with_gemini(app_type, amount, tier, app_id)
 
-    if not generated_html:
-        print(f"Failed to generate code from Gemini for {app_type} ({tier} tier).")
-        # Clean up directory if generation failed
+    if not generated_readme:
+        print(f"Failed to generate README.md for {app_type}. Aborting app generation.")
+        # Clean up directory if README generation failed
         if os.path.exists(app_dir):
             import shutil
             shutil.rmtree(app_dir)
         return None
 
-    # Generate README.md using Gemini Flash
-    generated_readme = generate_readme_with_gemini(app_type, amount, tier, app_id)
-    
+    # Generate code using Gemini, now including the generated_readme
+    generated_html = generate_code_with_gemini(app_type, tier, generated_readme)
+
+    if not generated_html:
+        print(f"Failed to generate code from Gemini for {app_type} ({tier} tier) using the generated README.")
+        # Clean up directory if code generation failed
+        if os.path.exists(app_dir):
+            import shutil
+            shutil.rmtree(app_dir)
+        return None
+
     # --- Save Generated Files ---
     try:
+        # Save README.md file
+        with open(readme_path, "w", encoding="utf-8") as f:
+            f.write(generated_readme)
+
         # Save HTML file
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(generated_html)
-            
-        # Save README.md file
-        if generated_readme:
-            with open(readme_path, "w", encoding="utf-8") as f:
-                f.write(generated_readme)
             
         print(f"Generated app 	{app_id}	 at 	{output_path}")
         

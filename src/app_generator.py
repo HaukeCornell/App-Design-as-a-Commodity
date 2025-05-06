@@ -60,7 +60,8 @@ def generate_code_with_gemini(app_type: str, tier: str, readme_content: str) -> 
         response = model_to_use.generate_content(prompt)
         
         # Extract code block if necessary (sometimes LLMs add markdown)
-        code_match = re.search(r"```html\n(.*?)\n```", response.text, re.DOTALL | re.IGNORECASE)
+        # Updated regex to optionally match 'html' after ```
+        code_match = re.search(r"```(?:html)?\n(.*?)\n```", response.text, re.DOTALL | re.IGNORECASE)
         if code_match:
             generated_code = code_match.group(1).strip()
         else:

@@ -2,7 +2,7 @@
 
 ## An Interactive Art Installation by [Hauke Sandhaus](https://haukesand.github.io/)
 
-![App Design as a Commodity](src/project_description/venmo-me-generation.png)
+<img src="src/project_description/venmo-me-generation.png" alt="App Design as a Commodity" width="400">
 
 ## Artist Statement
 
@@ -26,7 +26,16 @@ This installation consists of:
    - QR code for immediate access
    - System logs revealing the algorithmic creation process
 
-![Receipt Example](src/project_description/Coffee-counter-generated.png)
+<img src="src/project_description/Coffee-counter-generated.png" alt="Receipt Example" width="400">
+
+## Artist Statement
+
+*App Design as a Commodity* invites you into a liminal space between creation and transaction, where the boundary between human artistry and algorithmic determinism dissolves into a receipt. In our world of accelerating abstraction, software—once a craft of painstaking expertise—transforms before our eyes into a consumable good, reduced to its simplest economic representation: a price point.
+
+When you Venmo a modest sum to acquire a custom application, what exactly are you purchasing? The code itself? The creative labor? Or merely the permission to participate in an economic ritual that mimics the traditional exchange of value? As your personal app materializes through layers of abstraction—from language model to code repository to QR code to screen—it carries with it questions about our relationship with digital artifacts and the increasingly invisible infrastructure that produces them.
+
+The thermal printer's gentle hum punctuates this meditation, generating a tangible artifact documenting the intangible. Each receipt becomes a physical record of ephemeral processes, bearing witness to the paradox of custom mass production in the age of generative AI.
+
 
 ## Interaction Flow
 
@@ -37,7 +46,7 @@ This installation consists of:
 5. Receipt with QR code and links is produced for the participant
 6. Participant can access their custom app immediately via the generated link
 
-![Generated App Example](src/project_description/Output-Coffee-Counterapp.png)
+<img src="src/project_description/Output-Coffee-Counterapp.png" alt="Generated App Example" width="400">
 
 ## Technical Implementation
 

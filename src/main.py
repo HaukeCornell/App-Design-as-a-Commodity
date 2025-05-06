@@ -452,6 +452,10 @@ def generate_app_route():
         # Call QR Code Generation (Step 006)
         qr_code_base64 = generate_qr_code_base64(hosted_url_full)
 
+        # Capture the most recent 20 log entries
+        recent_logs = application_logs[-20:] if len(application_logs) > 0 else []
+        log_messages = "\n".join([f"[{log['level'].upper()}] {log['message']}" for log in recent_logs])
+        
         # Return success response including the full URL
         return jsonify({
             "message": f"App {generated_app_details['app_id']} generated successfully (Tier: {generated_app_details['tier']}).",
@@ -462,7 +466,8 @@ def generate_app_route():
             "github_url": github_url, 
             "qr_code_image": qr_code_base64,
             "readme_generated": "readme_path" in generated_app_details, # Boolean indicating if README was generated
-            "user": "testuser" # Hardcoded user as requested
+            "user": "testuser", # Hardcoded user as requested
+            "logs": log_messages
         }), 200
 
     except Exception as e:
@@ -524,6 +529,10 @@ def generate_app_for_payment(app_type: str, payment_amount: float) -> None:
         # Generate QR code for the app
         qr_code_base64 = generate_qr_code_base64(hosted_url_full)
         
+        # Capture the most recent 20 log entries 
+        recent_logs = application_logs[-20:] if len(application_logs) > 0 else []
+        log_messages = "\n".join([f"[{log['level'].upper()}] {log['message']}" for log in recent_logs])
+        
         # Store the generated app info for access by the UI
         venmo_qr_manager.last_generated_app = {
             "app_id": generated_app_details["app_id"],
@@ -535,7 +544,8 @@ def generate_app_for_payment(app_type: str, payment_amount: float) -> None:
             "qr_code_image": qr_code_base64,
             "message": f"App {generated_app_details['app_id']} generated successfully (Tier: {generated_app_details['tier']}).",
             "readme_generated": "readme_path" in generated_app_details,
-            "timestamp": time.time()
+            "timestamp": time.time(),
+            "logs": log_messages
         }
         
         # Log the success

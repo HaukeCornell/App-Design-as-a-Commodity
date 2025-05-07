@@ -1,6 +1,7 @@
 import sys
 import os
 from dotenv import load_dotenv
+import logging # Added import for logging
 
 # Load environment variables from .env file
 load_dotenv()
@@ -18,6 +19,10 @@ import time # For potential delays
 import threading
 import uuid
 
+# Import escpos library
+from escpos.printer import Usb
+from escpos.exceptions import USBNotFoundError, Error as EscposError
+
 # Import the app generator function
 from src.app_generator import generate_app_files
 
@@ -30,6 +35,87 @@ from src.venmo_config import VENMO_CONFIG, EMAIL_CONFIG
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__, static_folder="static", static_url_path="", template_folder="templates")
 GENERATED_APPS_DIR = os.path.abspath(os.path.join(_SCRIPT_DIR, "generated_apps"))
+
+# --- Thermal Printer Configuration ---
+thermal_printer = None
+# Epson TM-T20 series typically use these IDs. Verify with `lsusb` if issues arise.
+
+PRINTER_VENDOR_ID = 0x04b8
+PRINTER_PRODUCT_ID = 0x0e03 # Updated to 0x0e03 based on user's System Information
+# PRINTER_PROFILE = "TM-T20" # Profile for TM-T20 series - Commented out original
+
+# Logger for printer specific messages (will be captured by root logger's handler)
+printer_logger = logging.getLogger("thermal_printer")
+
+def init_thermal_printer():
+    """Initializes connection to the thermal printer."""
+    global thermal_printer
+    # Try the specific profiles for TM-T20II and 'default'
+    printer_profiles_to_try = ["TM-T20II", "TM-T20II-42col", "default"]
+
+    for profile_name in printer_profiles_to_try:
+        try:
+            printer_logger.info(f"Attempting to connect to thermal printer: Vendor ID 0x{PRINTER_VENDOR_ID:04x}, Product ID 0x{PRINTER_PRODUCT_ID:04x}, Profile: {profile_name}")
+            thermal_printer = Usb(PRINTER_VENDOR_ID, PRINTER_PRODUCT_ID, 0, profile=profile_name)
+            
+            thermal_printer.hw("INIT")
+            printer_logger.info(f"Thermal printer connected and initialized successfully (Profile: {profile_name}).")
+            # Removed text_type from set() call
+            thermal_printer.set(align='center', width=1, height=1, density=9) 
+            return
+        except USBNotFoundError:
+            printer_logger.error("Thermal printer not found by USB system. Please ensure it is connected, powered on, and Vendor/Product IDs are correct.")
+            thermal_printer = None
+            return # Stop trying if USB device not found at all
+        except Exception as e:
+            printer_logger.warning(f"Failed to connect or initialize with profile '{profile_name}': {e}")
+            thermal_printer = None
+            # Continue to the next profile in the list
+
+    if not thermal_printer:
+        printer_logger.error("Could not connect to thermal printer with the specified profiles (TM-T20II, TM-T20II-42col). Check USB connection, IDs, and ensure libusb is installed if necessary.")
+
+def safe_print_text(lines: list[str], align: str = 'center', cut: bool = False, text_type: str = 'NORMAL', width: int = 1, height: int = 1):
+    """Safely prints text lines to the thermal printer."""
+    if thermal_printer:
+        try:
+            # Removed text_type from set() call, width and height are passed directly if needed by textln or other methods
+            thermal_printer.set(align=align, width=width, height=height)
+            for line in lines:
+                thermal_printer.textln(line)
+            if cut:
+                thermal_printer.cut()
+        except EscposError as e:
+            printer_logger.error(f"ESC/POS library error during text printing: {e}")
+        except Exception as e:
+            printer_logger.error(f"Unexpected error during text printing: {e}")
+    else:
+        # Log to console if printer not available, as this is a primary interface
+        print("[NO PRINTER] " + "\n[NO PRINTER] ".join(lines))
+        printer_logger.warning("Thermal printer not available, skipping text print. Logged to console.")
+
+def safe_print_qr(data: str, text_above: str = None, text_below: str = None, align: str = 'center', size: int = 6, cut: bool = False):
+    """Safely prints a QR code to the thermal printer."""
+    if thermal_printer:
+        try:
+            thermal_printer.set(align=align)
+            if text_above:
+                thermal_printer.textln(text_above)
+            thermal_printer.qr(data, size=size)
+            if text_below:
+                thermal_printer.textln(text_below)
+            if cut:
+                thermal_printer.cut()
+        except EscposError as e:
+            printer_logger.error(f"ESC/POS library error during QR printing: {e}")
+        except Exception as e:
+            printer_logger.error(f"Unexpected error during QR printing: {e}")
+    else:
+        qr_message = f"QR Data: {data}"
+        if text_above: qr_message = f"{text_above}\n{qr_message}"
+        if text_below: qr_message = f"{qr_message}\n{text_below}"
+        print(f"[NO PRINTER] {qr_message}")
+        printer_logger.warning("Thermal printer not available, skipping QR print. Logged to console.")
 
 # Initialize Venmo QR manager with email monitoring
 def init_venmo_system():
@@ -305,6 +391,13 @@ def venmo_scanned():
     """Handle notification that someone scanned the Venmo QR code."""
     # Log the scan
     add_log("Someone scanned the Venmo QR code", "info")
+    safe_print_text([
+        "VENMO QR SCANNED!",
+        "User is at the payment step.",
+        "Waiting for Venmo email...",
+        "--------------------",
+        time.strftime("%Y-%m-%d %H:%M:%S")
+    ], align='left', cut=True)
     
     # The actual payment logic happens in the email monitor
     # This endpoint is just for notification that someone scanned the QR
@@ -489,7 +582,7 @@ def generate_app_route():
             filtered_logs.append(log)
         
         # Get the recent logs after filtering
-        recent_logs = filtered_logs[-8:] if len(filtered_logs) > 0 else []
+        recent_logs = filtered_logs[-8:] if len(filtered_logs > 0) else []
         log_entries = [f"{log['message']}" for log in recent_logs]
         
         # Combine AI info with log messages
@@ -532,7 +625,7 @@ def serve_generated_app(app_id):
     return send_from_directory(app_directory, "index.html")
 
 # Function to generate app from payment data
-def generate_app_for_payment(app_type: str, payment_amount: float) -> None:
+def generate_app_for_payment(app_type: str, payment_amount: float, user_who_paid: str = "TestUser") -> None:
     """
     Generate an app based on a received payment.
     Called automatically when a payment is received through email monitoring.
@@ -540,32 +633,76 @@ def generate_app_for_payment(app_type: str, payment_amount: float) -> None:
     Args:
         app_type: The type of app to generate (from the payment note)
         payment_amount: The amount of the payment
+        user_who_paid: Name of the user who paid (from Venmo note if possible)
     """
     try:
-        add_log(f"Starting app generation for payment: {app_type} (${payment_amount})", "info")
-        
+        log_msg = f"Starting app generation for payment: '{app_type}' (${payment_amount:.2f}) from '{user_who_paid}'"
+        add_log(log_msg, "info")
+        safe_print_text([
+            "PAYMENT RECEIVED!",
+            f"User: {user_who_paid}",
+            f"Amount: ${payment_amount:.2f}",
+            f"Request: {app_type}",
+            "--------------------",
+            "Generating your app...",
+            time.strftime("%Y-%m-%d %H:%M:%S")
+        ], align='left', cut=True)
+
         # Call App Generation Logic
         generated_app_details = generate_app_files(app_type, payment_amount)
         
         if not generated_app_details:
-            add_log(f"Failed to generate app for payment: {app_type}", "error")
+            err_msg = f"Failed to generate app for payment: {app_type}"
+            add_log(err_msg, "error")
+            safe_print_text([
+                "APP GENERATION FAILED",
+                f"Request: {app_type}",
+                f"Amount: ${payment_amount:.2f}",
+                "We apologize for the inconvenience.",
+                "Please see server logs for details.",
+                "--------------------",
+                time.strftime("%Y-%m-%d %H:%M:%S")
+            ], align='left', cut=True)
             return
         
+        app_id = generated_app_details["app_id"]
+        app_tier = generated_app_details["tier"]
+        actual_app_type = generated_app_details["app_type"] # Use type from details
+
+        safe_print_text([
+            f"APP '{actual_app_type}' GENERATED!",
+            f"Tier: {app_tier}",
+            f"ID: {app_id}",
+            "--------------------",
+            "Pushing to GitHub...",
+        ], align='left') # No cut yet, more details to follow
+
         # Call GitHub Integration
         github_url = push_to_github_real(
             generated_app_details["path"], 
-            generated_app_details["app_id"],
-            generated_app_details["app_type"]
+            app_id,
+            actual_app_type
         )
         
+        # Check for common error indicators in the returned GitHub URL string
+        if "Error:" in github_url or "(Repo not found" in github_url or "(Permission denied" in github_url or "pat-not-set" in github_url:
+            safe_print_text([
+                "GITHUB PUSH FAILED.",
+                "Details in server logs.",
+                "App was generated locally.",
+            ], align='left')
+        else:
+            safe_print_text([
+                "Pushed to GitHub successfully!",
+                 github_url, # This might be long, but good for a receipt
+            ], align='left')
+
         # Generate base URL for hosted app using IP address
         # Try to get local network IP address
         import socket
-        def get_local_ip():
+        def get_local_ip_for_receipt(): # Renamed to avoid conflict if imported elsewhere
             try:
-                # Get the local IP by creating a socket connection to an external server
                 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                # The address doesn't need to be reachable
                 s.connect(('8.8.8.8', 80))
                 ip = s.getsockname()[0]
                 s.close()
@@ -573,49 +710,31 @@ def generate_app_for_payment(app_type: str, payment_amount: float) -> None:
             except Exception:
                 return "localhost"
                 
-        local_ip = get_local_ip()
+        local_ip = get_local_ip_for_receipt()
         base_url = os.getenv("EXTERNAL_HOST", f"http://{local_ip}:5002")
         if not base_url.startswith(('http://', 'https://')):
             base_url = f"http://{base_url}"
             
-        hosted_url_relative = f"/apps/{generated_app_details['app_id']}/"
+        hosted_url_relative = f"/apps/{app_id}/"
         hosted_url_full = f"{base_url.strip('/')}{hosted_url_relative}"
         
-        # Generate QR code for the app
+        # Generate QR code for the app (for UI)
         qr_code_base64 = generate_qr_code_base64(hosted_url_full)
         
-        # Get actual model info from app_generator
-        import sys
-        sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-        from src.app_generator import model
-        
-        model_name = "gemini-1.5-pro-latest"
-        if model and hasattr(model, "_model_name"):
-            model_name = model._model_name
-        
-        # Add accurate AI model information
-        ai_info = [
-            f"AI: {model_name}",
-            f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}",
-            f"App ID: {generated_app_details['app_id']}"
-        ]
-        
-        # Capture the most recent logs, filtering out noise
-        filtered_logs = []
-        for log in application_logs:
-            msg = log['message'].lower()
-            # Skip unwanted logs
-            if any(x in msg for x in ['debugger', 'pin:', 'http/1.1', 'api/email-status']):
-                continue
-            filtered_logs.append(log)
-        
-        # Get the recent logs after filtering
-        recent_logs = filtered_logs[-8:] if len(filtered_logs) > 0 else []
-        log_entries = [f"{log['message']}" for log in recent_logs]
-        
-        # Combine AI info with log messages
-        all_logs = ai_info + ["---"] + log_entries
-        log_messages = "\n".join(all_logs)
+        safe_print_text([
+            "--------------------",
+            "YOUR APP IS READY!",
+            "Access URL:",
+            # hosted_url_full, # URL printed by QR function's text_below
+            "Scan QR code below to view:",
+        ], align='left')
+        safe_print_qr(hosted_url_full, text_below=f"{actual_app_type} ({app_id})", cut=False) # Add app type to QR text
+
+        safe_print_text([
+            "--------------------",
+            "Thank you for using Vibe Coder!",
+            time.strftime("%Y-%m-%d %H:%M:%S")
+        ], align='center', cut=True)
         
         # Store the generated app info for access by the UI
         venmo_qr_manager.last_generated_app = {
@@ -629,7 +748,7 @@ def generate_app_for_payment(app_type: str, payment_amount: float) -> None:
             "message": f"App {generated_app_details['app_id']} generated successfully (Tier: {generated_app_details['tier']}).",
             "readme_generated": "readme_path" in generated_app_details,
             "timestamp": time.time(),
-            "logs": log_messages
+            "logs": log_msg
         }
         
         # Log the success
@@ -644,6 +763,23 @@ def generate_app_for_payment(app_type: str, payment_amount: float) -> None:
 if __name__ == "__main__":
     # Initialize the Venmo payment system
     init_venmo_system()
+    # Initialize the Thermal Printer System
+    init_thermal_printer()
+    
+    if thermal_printer:
+        safe_print_text([
+            "VIBE CODER",
+            "Thermal Receipt System Online",
+            "--------------------",
+            "Scan Venmo QR on main screen",
+            "to generate an app!",
+            "Payment URL (for reference):",
+            VENMO_CONFIG["venmo_profile_url"],
+            "--------------------",
+            time.strftime("%Y-%m-%d %H:%M:%S")
+        ], align='center', cut=True)
+    else:
+        print("NOTICE: Thermal printer not initialized. Printing to console only.")
     
     # Use port 5002 for local testing
     port = int(os.getenv("PORT", 5002))

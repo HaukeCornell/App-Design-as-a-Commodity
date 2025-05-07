@@ -375,15 +375,21 @@ def generate_app_for_payment(app_type: str, payment_amount: float, user_who_paid
     try:
         log_msg = f"Starting app generation for payment: '{app_type}' (${payment_amount:.2f}) from '{user_who_paid}'"
         add_log(log_msg, "info")
-        thermal_printer_manager.print_text([
-            "PAYMENT RECEIVED!",
+        
+        # Print payment received section on the continuous receipt (no cut)
+        payment_details = [
             f"User: {user_who_paid}",
             f"Amount: ${payment_amount:.2f}",
             f"Request: {app_type}",
-            "--------------------",
             "Generating your app...",
             time.strftime("%Y-%m-%d %H:%M:%S")
-        ], align='left', cut=True)
+        ]
+        
+        # Add payment section to the receipt without cutting
+        thermal_printer_manager.print_continuous_receipt(
+            payment_received_lines=payment_details,
+            cut_after=False
+        )
 
         # Call App Generation Logic
         generated_app_details = generate_app_files(app_type, payment_amount)
@@ -391,6 +397,7 @@ def generate_app_for_payment(app_type: str, payment_amount: float, user_who_paid
         if not generated_app_details:
             err_msg = f"Failed to generate app for payment: {app_type}"
             add_log(err_msg, "error")
+            # Handle error with a cut - since we need to start a new flow
             thermal_printer_manager.print_text([
                 "APP GENERATION FAILED",
                 f"Request: {app_type}",
@@ -406,14 +413,6 @@ def generate_app_for_payment(app_type: str, payment_amount: float, user_who_paid
         app_tier = generated_app_details["tier"]
         actual_app_type = generated_app_details["app_type"] # Use type from details
 
-        thermal_printer_manager.print_text([
-            f"APP '{actual_app_type}' GENERATED!",
-            f"Tier: {app_tier}",
-            f"ID: {app_id}",
-            "--------------------",
-            "Pushing to GitHub...",
-        ], align='left') # No cut yet, more details to follow
-
         # Call GitHub Integration
         github_url = github_service.push_to_github(
             generated_app_details["path"], 
@@ -421,21 +420,22 @@ def generate_app_for_payment(app_type: str, payment_amount: float, user_who_paid
             actual_app_type
         )
         
-        # Check for common error indicators in the returned GitHub URL string
+        # Prepare app generation details lines
+        app_details = [
+            f"App Type: {actual_app_type}",
+            f"Tier: {app_tier}",
+            f"ID: {app_id}"
+        ]
+
+        # Add GitHub URL details
         if "Error:" in github_url or "(Repo not found" in github_url or "(Permission denied" in github_url or "pat-not-set" in github_url:
-            thermal_printer_manager.print_text([
-                "GITHUB PUSH FAILED.",
-                "Details in server logs.",
-                "App was generated locally.",
-            ], align='left')
+            app_details.append("GITHUB PUSH FAILED.")
+            app_details.append("App was generated locally.")
         else:
-            thermal_printer_manager.print_text([
-                "Pushed to GitHub successfully!",
-                 github_url, # This might be long, but good for a receipt
-            ], align='left')
+            app_details.append("GitHub Repository:")
+            app_details.append(github_url)
 
         # Generate base URL for hosted app using IP address
-        # Try to get local network IP address
         import socket
         def get_local_ip_for_receipt(): # Renamed to avoid conflict if imported elsewhere
             try:
@@ -458,20 +458,44 @@ def generate_app_for_payment(app_type: str, payment_amount: float, user_who_paid
         # Generate QR code for the app (for UI)
         qr_code_base64 = generate_qr_code_base64(hosted_url_full)
         
-        thermal_printer_manager.print_text([
-            "--------------------",
-            "YOUR APP IS READY!",
-            "Access URL:",
-            # hosted_url_full, # URL printed by QR function's text_below
-            "Scan QR code below to view:",
-        ], align='left')
-        thermal_printer_manager.print_qr(hosted_url_full, text_below=f"{actual_app_type} ({app_id})", cut=False) # Add app type to QR text
-
-        thermal_printer_manager.print_text([
-            "--------------------",
-            "Thank you for using Vibe Coder!",
-            time.strftime("%Y-%m-%d %H:%M:%S")
-        ], align='center', cut=True)
+        # Add app URL details and QR code
+        app_details.append("Access your app at:")
+        app_details.append(hosted_url_full)
+        
+        # Complete the receipt with the app generation details and cut the paper
+        thermal_printer_manager.print_continuous_receipt(
+            app_generated_lines=app_details,
+            cut_after=True
+        )
+        
+        # After cutting, start a new receipt with initial instructions
+        venmo_url = VENMO_CONFIG["venmo_profile_url"]
+        thermal_printer_manager.print_continuous_receipt(
+            initial_setup_lines=[
+                "VIBE CODER",
+                "Thermal Receipt System Online",
+                "--------------------", 
+                "Scan Venmo QR code below",
+                "to generate an app!",
+                "Payment URL (for reference):",
+                venmo_url,
+                "--------------------",
+                "Type the app you want and",
+                "the amount of money in Venmo.",
+                "--------------------",
+                time.strftime("%Y-%m-%d %H:%M:%S")
+            ],
+            venmo_qr_data=venmo_url,
+            cut_after=False
+        )
+        
+        # Print the QR code separately (not part of the continuous receipt)
+        thermal_printer_manager.print_qr(
+            hosted_url_full, 
+            text_above="Scan to view your app:",
+            text_below=f"{actual_app_type} ({app_id})", 
+            cut=False
+        )
         
         # Store the generated app info for access by the UI
         venmo_qr_manager.last_generated_app = {
@@ -504,17 +528,29 @@ if __name__ == "__main__":
     init_thermal_printer()
     
     if thermal_printer_manager.initialized:
-        thermal_printer_manager.print_text([
-            "VIBE CODER",
-            "Thermal Receipt System Online",
-            "--------------------",
-            "Scan Venmo QR on main screen",
-            "to generate an app!",
-            "Payment URL (for reference):",
-            VENMO_CONFIG["venmo_profile_url"],
-            "--------------------",
-            time.strftime("%Y-%m-%d %H:%M:%S")
-        ], align='center', cut=True)
+        # Get the venmo URL for the QR code
+        venmo_url = VENMO_CONFIG["venmo_profile_url"]
+        
+        # Print initial instructions using continuous receipt format
+        # This is the first section and doesn't cut the paper
+        thermal_printer_manager.print_continuous_receipt(
+            initial_setup_lines=[
+                "VIBE CODER",
+                "Thermal Receipt System Online",
+                "--------------------",
+                "Scan Venmo QR code below",
+                "to generate an app!",
+                "Payment URL (for reference):",
+                venmo_url,
+                "--------------------",
+                "Type the app you want and",
+                "the amount of money in Venmo.",
+                "--------------------",
+                time.strftime("%Y-%m-%d %H:%M:%S")
+            ],
+            venmo_qr_data=venmo_url,
+            cut_after=False
+        )
     else:
         print("NOTICE: Thermal printer not initialized. Printing to console only.")
     

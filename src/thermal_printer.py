@@ -6,6 +6,7 @@ This module handles communication with a thermal receipt printer using ESC/POS c
 import os
 import logging
 import sys
+import time
 from escpos.printer import Usb
 from escpos.exceptions import USBNotFoundError, Error as EscposError
 
@@ -290,6 +291,104 @@ class ThermalPrinter:
             
         except Exception as e:
             printer_logger.error(f"Unexpected error during receipt printing: {e}")
+            return False
+            
+    def print_continuous_receipt(self, initial_setup_lines=None, payment_received_lines=None, app_generated_lines=None, venmo_qr_data=None, cut_after=False):
+        """
+        Print a full receipt as one continuous slip with multiple sections that are appended as processing progresses.
+        
+        This method can be called multiple times to add new sections to an ongoing receipt.
+        Only cut the paper when all sections have been printed.
+        
+        Args:
+            initial_setup_lines: List of strings for initial instructions (can be None if not at starting phase)
+            payment_received_lines: List of strings for payment confirmation (can be None if not at payment phase)
+            app_generated_lines: List of strings for app generation details (can be None if not at app generation phase)
+            venmo_qr_data: Data for the Venmo QR code to print (can be None if not needed)
+            cut_after: Whether to cut the paper after printing (set to True only after all sections are printed)
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.initialized or not self.printer:
+            # Log to console if printer not available
+            combined_lines = []
+            if initial_setup_lines:
+                combined_lines.extend(initial_setup_lines)
+                if venmo_qr_data:
+                    combined_lines.extend(["--- VENMO QR CODE ---", f"QR Data: {venmo_qr_data}"])
+            if payment_received_lines:
+                combined_lines.extend(["--- PAYMENT RECEIVED ---"] + payment_received_lines)
+            if app_generated_lines:
+                combined_lines.extend(["--- APP GENERATED ---"] + app_generated_lines)
+                
+            print("[NO PRINTER] " + "\n[NO PRINTER] ".join(combined_lines))
+            printer_logger.warning("Thermal printer not available, skipping continuous receipt print. Logged to console.")
+            return False
+            
+        try:
+            # Print initial setup if provided (only at the start of the flow)
+            if initial_setup_lines:
+                self.printer.set(align='center', width=1, height=1)
+                for line in initial_setup_lines:
+                    self.printer.textln(line)
+                
+                # Add a bit of space
+                self.printer.text("\n")
+                
+                # If Venmo QR data is provided, print it as part of the initial setup
+                if venmo_qr_data:
+                    self.printer.set(align='center')
+                    self.printer.textln("SCAN TO PAY WITH VENMO:")
+                    self.printer.qr(venmo_qr_data, size=6)
+                    self.printer.textln("Include app description and amount in your payment")
+                    self.printer.text("\n")
+                
+            # Print payment received section if provided (during payment phase)
+            if payment_received_lines:
+                # Header for payment section
+                self.printer.set(align='center', width=1, height=1)
+                self.printer.textln("PAYMENT RECEIVED!")
+                self.printer.text("--------------------\n")
+                
+                # Payment details
+                self.printer.set(align='left', width=1, height=1)
+                for line in payment_received_lines:
+                    self.printer.textln(line)
+                    
+                # Add a bit of space
+                self.printer.text("\n")
+                
+            # Print app generated section if provided (during app generation phase)
+            if app_generated_lines:
+                # Header for app generation section
+                self.printer.set(align='center', width=1, height=1)
+                self.printer.textln("APP GENERATED!")
+                self.printer.text("--------------------\n")
+                
+                # App generation details
+                self.printer.set(align='left', width=1, height=1)
+                for line in app_generated_lines:
+                    self.printer.textln(line)
+                    
+                # Thank you message at the end
+                self.printer.set(align='center', width=1, height=1)
+                self.printer.text("\n--------------------\n")
+                self.printer.textln("Thank you for using Vibe Coder!")
+                self.printer.textln(time.strftime("%Y-%m-%d %H:%M:%S"))
+                
+            # Only cut if explicitly requested (typically only after all sections are printed)
+            if cut_after:
+                self.printer.cut()
+                
+            return True
+                
+        except EscposError as e:
+            printer_logger.error(f"ESC/POS library error during continuous receipt printing: {e}")
+            return False
+            
+        except Exception as e:
+            printer_logger.error(f"Unexpected error during continuous receipt printing: {e}")
             return False
 
     def close(self):

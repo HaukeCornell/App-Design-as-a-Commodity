@@ -239,19 +239,25 @@ class VenmoQRManager:
                         sys.path.insert(0, parent_dir)
                     
                     # Use a direct import instead of src.main
-                    from main import generate_app_for_payment
-                    
-                    # Trigger app generation in a separate thread to avoid blocking
-                    import threading
-                    logger.info(f"Starting app generation for payment: {note}")
+                    from main import generate_app_for_payment, can_generate_new_app, start_generation
                     
                     # Make sure the note is valid and not just sender info
                     if note and len(note) > 5 and "paid you" not in note.lower():
-                        threading.Thread(
-                            target=generate_app_for_payment,
-                            args=(note, payment_data.get("amount", 0.25)),
-                            daemon=True
-                        ).start()
+                        # Check if we can generate a new app (using the global lock mechanism)
+                        if can_generate_new_app():
+                            # Acquire the generation lock
+                            start_generation()
+                            logger.info(f"Starting app generation for payment: {note}")
+                            
+                            # Call directly instead of starting a new thread
+                            # This ensures we don't have multiple threads running simultaneously
+                            generate_app_for_payment(
+                                note, 
+                                payment_data.get("amount", 0.25),
+                                payment_data.get("sender", "VibePay User")
+                            )
+                        else:
+                            logger.warning("Cannot generate app: another generation is in progress or cooldown is active")
                     else:
                         logger.error(f"Invalid app description detected: '{note}'. Cannot generate app without a valid description.")
                 except Exception as gen_error:

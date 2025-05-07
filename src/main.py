@@ -344,6 +344,11 @@ def vibepay_payment():
                 const amount = document.getElementById('amount').value;
                 const note = document.getElementById('note').value;
                 
+                // Disable the button immediately to prevent multiple submits
+                const submitButton = document.querySelector('button[type="submit"]');
+                submitButton.disabled = true;
+                submitButton.textContent = 'Processing...';
+                
                 // Send the payment info to our simulated payment endpoint
                 fetch('/api/vibepay-payment', {{
                     method: 'POST',
@@ -355,19 +360,80 @@ def vibepay_payment():
                         note: note
                     }})
                 }})
-                .then(response => response.json())
-                .then(data => {{
-                    // Show success message
-                    document.getElementById('success-message').style.display = 'block';
-                    document.querySelector('button').disabled = true;
+                .then(response => response.json().then(data => {{ return {{response, data}}; }}))
+                .then(result => {{
+                    const response = result.response;
+                    const data = result.data;
                     
-                    // Redirect after 3 seconds
-                    setTimeout(() => {{
-                        window.location.href = '/';
-                    }}, 3000);
+                    // Handle cooldown or already generating case
+                    if (response.status === 429) {{
+                        const successMsg = document.getElementById('success-message');
+                        successMsg.style.display = 'block';
+                        successMsg.style.backgroundColor = '#fff3cd';
+                        successMsg.style.borderLeft = '4px solid #ffc107';
+                        
+                        if (data.is_generating) {{
+                            successMsg.innerHTML = '<strong>Another app is currently being generated.</strong><br>Please wait until the current generation completes before submitting a new request.';
+                        }} else {{
+                            const remainingTime = Math.ceil(data.cooldown_seconds_remaining || 15);
+                            successMsg.innerHTML = '<strong>Generation cooldown in effect.</strong><br>Please wait ' + remainingTime + ' seconds before requesting another app.';
+                            
+                            // Start a countdown
+                            let timeLeft = remainingTime;
+                            const interval = setInterval(() => {{
+                                timeLeft--;
+                                if (timeLeft <= 0) {{
+                                    clearInterval(interval);
+                                    submitButton.disabled = false;
+                                    submitButton.textContent = 'Pay Now';
+                                    successMsg.style.display = 'none';
+                                }} else {{
+                                    successMsg.innerHTML = '<strong>Generation cooldown in effect.</strong><br>Please wait ' + timeLeft + ' seconds before requesting another app.';
+                                }}
+                            }}, 1000);
+                        }}
+                        
+                        return;
+                    }}
+                    
+                    // Handle standard success
+                    if (response.ok && data.success) {{
+                        // Show success message
+                        const successMsg = document.getElementById('success-message');
+                        successMsg.style.display = 'block';
+                        successMsg.innerHTML = 'Payment successful! Your app is being generated.';
+                        successMsg.style.backgroundColor = '#E3F2FD';
+                        successMsg.style.borderLeft = '4px solid #0074DE';
+                        
+                        // Redirect after 3 seconds
+                        setTimeout(() => {{
+                            window.location.href = '/';
+                        }}, 3000);
+                    }} else {{
+                        // Handle error conditions
+                        const successMsg = document.getElementById('success-message');
+                        successMsg.style.display = 'block';
+                        successMsg.style.backgroundColor = '#FFEBEE';
+                        successMsg.style.borderLeft = '4px solid #F44336';
+                        successMsg.innerHTML = '<strong>Error:</strong> ' + (data.error || 'Failed to process payment');
+                        
+                        // Enable button again after 5 seconds
+                        setTimeout(() => {{
+                            submitButton.disabled = false;
+                            submitButton.textContent = 'Pay Now';
+                        }}, 5000);
+                    }}
                 }})
                 .catch(error => {{
-                    alert('Error processing payment: ' + error.message);
+                    const successMsg = document.getElementById('success-message');
+                    successMsg.style.display = 'block';
+                    successMsg.style.backgroundColor = '#FFEBEE';
+                    successMsg.style.borderLeft = '4px solid #F44336';
+                    successMsg.innerHTML = '<strong>Error:</strong> ' + (error.message || 'An unexpected error occurred');
+                    
+                    // Enable button again
+                    submitButton.disabled = false;
+                    submitButton.textContent = 'Pay Now';
                 }});
             }});
         </script>
@@ -379,6 +445,14 @@ def vibepay_payment():
 @app.route("/api/vibepay-payment", methods=["POST"])
 def process_vibepay_payment():
     """Process a simulated VibePay payment."""
+    # Check if we can generate a new app (cooldown and lock mechanism)
+    if not can_generate_new_app():
+        return jsonify({
+            "error": "App generation cooldown in effect or another app is being generated",
+            "cooldown_seconds_remaining": max(0, GENERATION_LOCK["cooldown_seconds"] - (time.time() - GENERATION_LOCK["last_generation_time"])),
+            "is_generating": GENERATION_LOCK["is_generating"]
+        }), 429  # 429 Too Many Requests
+        
     # Get the payment info from the request body
     data = request.get_json()
     if not data:
@@ -399,6 +473,9 @@ def process_vibepay_payment():
     # Log the payment
     add_log(f"VibePay payment received: ${amount:.2f} for '{note}'", "info")
     
+    # Acquire the generation lock
+    start_generation()
+    
     # Use the same flow as real Venmo payments to generate the app
     try:
         # Create a payment data structure similar to what venmo_email.py produces
@@ -409,14 +486,35 @@ def process_vibepay_payment():
             "timestamp": time.time()
         }
         
+        # Print receipt for VibePay if thermal printer is connected
+        if thermal_printer_manager.initialized:
+            payment_details = [
+                f"User: VibePay User",
+                f"Amount: ${amount:.2f}",
+                f"Request: {note}",
+                "Generating your app...",
+                time.strftime("%Y-%m-%d %H:%M:%S")
+            ]
+            
+            # Add payment section to the receipt without cutting
+            thermal_printer_manager.print_continuous_receipt(
+                payment_received_lines=payment_details,
+                cut_after=False
+            )
+        
         # Trigger app generation using the venmo_qr_manager
         venmo_qr_manager.handle_payment(payment_data)
+        
+        # App was generated, update cooldown
+        end_generation()
         
         return jsonify({
             "success": True,
             "message": "Payment processed successfully"
         })
     except Exception as e:
+        # Release lock on error
+        end_generation()
         add_log(f"Error processing VibePay payment: {e}", "error")
         return jsonify({
             "success": False,
@@ -541,13 +639,20 @@ def toggle_payment_mode():
     # Log the mode change
     add_log(f"Payment mode switched from {current_mode} to {requested_mode}", "info")
     
+    # Prepare payment service name for logs/receipts
+    payment_service = PAYMENT_MODE[requested_mode]["name"]
+    
     # Print a new receipt with the updated payment mode
     if thermal_printer_manager.initialized:
         # First cut the current receipt to start a clean one
         thermal_printer_manager.print_text(
             [
                 "PAYMENT MODE CHANGED",
-                f"Switching to {PAYMENT_MODE[requested_mode]['name']} mode",
+                f"Switching to {payment_service} mode",
+                "--------------------",
+                "A new receipt is being printed",
+                "with updated QR code.",
+                "--------------------",
                 time.strftime("%m/%d/%Y %H:%M:%S")
             ],
             align='center',
@@ -568,12 +673,36 @@ def toggle_payment_mode():
         # Force clear any previous print job to ensure complete reprint
         time.sleep(0.5)  # Small delay to ensure previous print is complete
         
+        # Add mode-specific instructions for clarity
+        if requested_mode == "venmo":
+            header_text = [
+                "VENMO PAYMENT MODE",
+                "Monitor emails for real payments",
+            ]
+        else:  # vibepay
+            header_text = [
+                "VIBEPAY PAYMENT MODE",
+                "Simulated payments for testing",
+            ]
+        
+        # Print mode-specific header first
+        thermal_printer_manager.print_text(
+            header_text,
+            align='center',
+            cut=False
+        )
+        
+        # Short delay before printing the main receipt content
+        time.sleep(0.2)
+        
         # Print a fresh receipt with the new payment mode and QR code
         thermal_printer_manager.print_continuous_receipt(
             initial_setup_lines=receipt_content["initial_setup_lines"],
             venmo_qr_data=payment_url,  # Use the direct URL to ensure QR code is updated
             cut_after=False
         )
+        
+        add_log(f"Printed new receipt with {payment_service} QR code", "info")
     
     return jsonify({
         "message": f"Payment mode switched to {requested_mode}",
@@ -610,114 +739,144 @@ def check_emails_now():
 def generate_app_route():
     """Handle the app generation request from the frontend or Venmo payment."""
     try:
-        # Check if this is a GET request with a session ID (from Venmo flow)
-        if request.method == "GET" and request.args.get("session_id"):
-            session_id = request.args.get("session_id")
-            session = venmo_qr_manager.get_session(session_id)
-            
-            if not session:
-                return jsonify({"error": "Invalid or expired session"}), 400
+        # Check if we can generate a new app (cooldown and lock mechanism)
+        if not can_generate_new_app():
+            return jsonify({
+                "error": "App generation cooldown in effect or another app is being generated",
+                "cooldown_seconds_remaining": max(0, GENERATION_LOCK["cooldown_seconds"] - (time.time() - GENERATION_LOCK["last_generation_time"])),
+                "is_generating": GENERATION_LOCK["is_generating"]
+            }), 429  # 429 Too Many Requests
+        
+        # Acquire the generation lock
+        start_generation()
+        add_log("Starting app generation process...", "info")
+        
+        try:
+            # Check if this is a GET request with a session ID (from Venmo flow)
+            if request.method == "GET" and request.args.get("session_id"):
+                session_id = request.args.get("session_id")
+                session = venmo_qr_manager.get_session(session_id)
                 
-            if not session.get("paid", False):
-                return jsonify({"error": "Payment not received yet"}), 400
+                if not session:
+                    end_generation()  # Release lock on error
+                    return jsonify({"error": "Invalid or expired session"}), 400
+                    
+                if not session.get("paid", False):
+                    end_generation()  # Release lock on error
+                    return jsonify({"error": "Payment not received yet"}), 400
+                    
+                # Extract data from the session
+                app_type = session.get("app_type", "calculator")
+                payment_amount = session.get("amount", 0.25)
                 
-            # Extract data from the session
-            app_type = session.get("app_type", "calculator")
-            payment_amount = session.get("amount", 0.25)
+            # Otherwise, handle as normal POST request with JSON data
+            else:
+                data = request.get_json()
+                if not data or "app_type" not in data or "amount" not in data:
+                    end_generation()  # Release lock on error
+                    return jsonify({"error": "Missing app_type or amount in request"}), 400
+
+                app_type = data.get("app_type")
+                amount_str = data.get("amount")
+
+                # Validate amount
+                try:
+                    payment_amount = float(amount_str)
+                    if payment_amount <= 0:
+                        raise ValueError("Amount must be positive")
+                except (ValueError, TypeError):
+                    end_generation()  # Release lock on error
+                    return jsonify({"error": "Invalid amount specified"}), 400
             
-        # Otherwise, handle as normal POST request with JSON data
-        else:
-            data = request.get_json()
-            if not data or "app_type" not in data or "amount" not in data:
-                return jsonify({"error": "Missing app_type or amount in request"}), 400
+            add_log(f"Generating app of type: '{app_type}' with payment amount: ${payment_amount}", "info")
 
-            app_type = data.get("app_type")
-            amount_str = data.get("amount")
-
-            # Validate amount
-            try:
-                payment_amount = float(amount_str)
-                if payment_amount <= 0:
-                    raise ValueError("Amount must be positive")
-            except (ValueError, TypeError):
-                return jsonify({"error": "Invalid amount specified"}), 400
-
-        # Call App Generation Logic (Step 004 - Enhanced)
-        generated_app_details = generate_app_files(app_type, payment_amount)
-        
-        if not generated_app_details:
-            # Error logged within generate_app_files
-            return jsonify({"error": f"Failed to generate app code for type: {app_type}"}), 500
-
-        # Call GitHub Integration (Step 005 - Real)
-        github_url = github_service.push_to_github(
-            generated_app_details["path"], 
-            generated_app_details["app_id"],
-            generated_app_details["app_type"]
-        )
-
-        # Web Hosting URL (Step 005 - using local route)
-        hosted_url_relative = url_for("serve_generated_app", app_id=generated_app_details["app_id"], _external=False)
-        
-        # Use IP address for URLs
-        local_ip = get_local_ip()
-        
-        # Use environment variable for external URL, falling back to IP address
-        external_host = os.getenv("EXTERNAL_HOST", f"http://{local_ip}:5002")
-        if not external_host.startswith(('http://', 'https://')):
-            external_host = f"http://{external_host}"
-        hosted_url_full = f"{external_host.strip('/')}{hosted_url_relative}"
-
-        # Call QR Code Generation (Step 006)
-        qr_code_base64 = generate_qr_code_base64(hosted_url_full)
-
-        # Get actual model info from app_generator
-        import sys
-        sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-        from app_generator import model
-        
-        model_name = "gemini-1.5-pro-latest"
-        if model and hasattr(model, "_model_name"):
-            model_name = model._model_name
+            # Call App Generation Logic (Step 004 - Enhanced)
+            generated_app_details = generate_app_files(app_type, payment_amount)
             
-        # Add accurate AI model information
-        ai_info = [
-            f"AI: {model_name}",
-            f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}",
-            f"App ID: {generated_app_details['app_id']}"
-        ]
-        
-        # Capture the most recent logs, filtering out noise
-        filtered_logs = []
-        for log in application_logs:
-            msg = log['message'].lower()
-            # Skip unwanted logs
-            if any(x in msg for x in ['debugger', 'pin:', 'http/1.1', 'api/email-status']):
-                continue
-            filtered_logs.append(log)
-        
-        # Get the recent logs after filtering
-        recent_logs = filtered_logs[-8:] if filtered_logs else []
-        log_entries = [f"{log['message']}" for log in recent_logs]
-        
-        # Combine AI info with log messages
-        all_logs = ai_info + ["---"] + log_entries
-        log_messages = "\n".join(all_logs)
-        
-        # Return success response including the full URL
-        return jsonify({
-            "message": f"App {generated_app_details['app_id']} generated successfully (Tier: {generated_app_details['tier']}).",
-            "app_type_received": app_type,
-            "amount_received": payment_amount,
-            "hosted_url_relative": hosted_url_relative, # Relative URL for links within the page
-            "hosted_url_full": hosted_url_full, # Full URL for display and QR code
-            "github_url": github_url, 
-            "qr_code_image": qr_code_base64,
-            "readme_generated": "readme_path" in generated_app_details, # Boolean indicating if README was generated
-            "user": "testuser", # Hardcoded user as requested
-            "logs": log_messages
-        }), 200
+            if not generated_app_details:
+                # Error logged within generate_app_files
+                end_generation()  # Release lock on error
+                return jsonify({"error": f"Failed to generate app code for type: {app_type}"}), 500
 
+            # Call GitHub Integration (Step 005 - Real)
+            github_url = github_service.push_to_github(
+                generated_app_details["path"], 
+                generated_app_details["app_id"],
+                generated_app_details["app_type"]
+            )
+
+            # Web Hosting URL (Step 005 - using local route)
+            hosted_url_relative = url_for("serve_generated_app", app_id=generated_app_details["app_id"], _external=False)
+            
+            # Use IP address for URLs
+            local_ip = get_local_ip()
+            
+            # Use environment variable for external URL, falling back to IP address
+            external_host = os.getenv("EXTERNAL_HOST", f"http://{local_ip}:5002")
+            if not external_host.startswith(('http://', 'https://')):
+                external_host = f"http://{external_host}"
+            hosted_url_full = f"{external_host.strip('/')}{hosted_url_relative}"
+
+            # Call QR Code Generation (Step 006)
+            qr_code_base64 = generate_qr_code_base64(hosted_url_full)
+
+            # Get actual model info from app_generator
+            import sys
+            sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+            from app_generator import model
+            
+            model_name = "gemini-1.5-pro-latest"
+            if model and hasattr(model, "_model_name"):
+                model_name = model._model_name
+                
+            # Add accurate AI model information
+            ai_info = [
+                f"AI: {model_name}",
+                f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}",
+                f"App ID: {generated_app_details['app_id']}"
+            ]
+            
+            # Capture the most recent logs, filtering out noise
+            filtered_logs = []
+            for log in application_logs:
+                msg = log['message'].lower()
+                # Skip unwanted logs
+                if any(x in msg for x in ['debugger', 'pin:', 'http/1.1', 'api/email-status']):
+                    continue
+                filtered_logs.append(log)
+            
+            # Get the recent logs after filtering
+            recent_logs = filtered_logs[-8:] if filtered_logs else []
+            log_entries = [f"{log['message']}" for log in recent_logs]
+            
+            # Combine AI info with log messages
+            all_logs = ai_info + ["---"] + log_entries
+            log_messages = "\n".join(all_logs)
+            
+            add_log(f"App generation completed successfully: App ID {generated_app_details['app_id']}", "info")
+            
+            # Release the generation lock
+            end_generation()
+            
+            # Return success response including the full URL
+            return jsonify({
+                "message": f"App {generated_app_details['app_id']} generated successfully (Tier: {generated_app_details['tier']}).",
+                "app_type_received": app_type,
+                "amount_received": payment_amount,
+                "hosted_url_relative": hosted_url_relative, # Relative URL for links within the page
+                "hosted_url_full": hosted_url_full, # Full URL for display and QR code
+                "github_url": github_url, 
+                "qr_code_image": qr_code_base64,
+                "readme_generated": "readme_path" in generated_app_details, # Boolean indicating if README was generated
+                "user": "testuser", # Hardcoded user as requested
+                "logs": log_messages
+            }), 200
+            
+        except Exception as e:
+            # Release the generation lock on any exception
+            end_generation()
+            raise e  # Re-raise to be caught by outer try/except
+    
     except Exception as e:
         print(f"Error during generation route: {e}") # Log error server-side
         return jsonify({"error": f"An internal error occurred: {str(e)}"}), 500
@@ -764,107 +923,119 @@ def generate_app_for_payment(app_type: str, payment_amount: float, user_who_paid
         ]
         
         # Add payment section to the receipt without cutting
-        thermal_printer_manager.print_continuous_receipt(
-            payment_received_lines=payment_details,
-            cut_after=False
-        )
+        if thermal_printer_manager.initialized:
+            thermal_printer_manager.print_continuous_receipt(
+                payment_received_lines=payment_details,
+                cut_after=False
+            )
 
-        # Call App Generation Logic
-        generated_app_details = generate_app_files(app_type, payment_amount)
-        
-        if not generated_app_details:
-            err_msg = f"Failed to generate app for payment: {app_type}"
-            add_log(err_msg, "error")
-            # Handle error with a cut - since we need to start a new flow
-            thermal_printer_manager.print_text([
-                "APP GENERATION FAILED",
-                f"Request: {app_type}",
-                f"Amount: ${payment_amount:.2f}",
-                "We apologize for the inconvenience.",
-                "Please see server logs for details.",
-                "--------------------",
-                time.strftime("%Y-%m-%d %H:%M:%S")
-            ], align='left', cut=True)
-            return
-        
-        app_id = generated_app_details["app_id"]
-        app_tier = generated_app_details["tier"]
-        actual_app_type = generated_app_details["app_type"] # Use type from details
-
-        # Call GitHub Integration
-        github_url = github_service.push_to_github(
-            generated_app_details["path"], 
-            app_id,
-            actual_app_type
-        )
-        
-        # Prepare app generation details lines
-        app_details = [
-            f"App Type: {actual_app_type}",
-            f"Tier: {app_tier}",
-            f"ID: {app_id}"
-        ]
-
-        # Add GitHub URL details
-        if "Error:" in github_url or "(Repo not found" in github_url or "(Permission denied" in github_url or "pat-not-set" in github_url:
-            app_details.append("GITHUB PUSH FAILED.")
-            app_details.append("App was generated locally.")
-        else:
-            app_details.append("GitHub Repository:")
-            app_details.append(github_url)
-
-        # Generate base URL for hosted app using IP address
-        local_ip = get_local_ip()
-        base_url = os.getenv("EXTERNAL_HOST", f"http://{local_ip}:5002")
-        if not base_url.startswith(('http://', 'https://')):
-            base_url = f"http://{base_url}"
+        try:
+            # Call App Generation Logic
+            generated_app_details = generate_app_files(app_type, payment_amount)
             
-        hosted_url_relative = f"/apps/{app_id}/"
-        hosted_url_full = f"{base_url.strip('/')}{hosted_url_relative}"
-        
-        # Generate QR code for the app (for UI)
-        qr_code_base64 = generate_qr_code_base64(hosted_url_full)
-        
-        # Add app URL details and QR code
-        app_details.append("Access your app at:")
-        app_details.append(hosted_url_full)
-        
-        # Complete the receipt with the app generation details and cut the paper
-        thermal_printer_manager.print_continuous_receipt(
-            app_generated_lines=app_details,
-            app_url=hosted_url_full,  # Include the app URL for QR code
-            cut_after=True
-        )
-        
-        # After cutting, start a new receipt with initial instructions
-        receipt_content = get_initial_receipt_content()
-        thermal_printer_manager.print_continuous_receipt(
-            initial_setup_lines=receipt_content["initial_setup_lines"],
-            venmo_qr_data=receipt_content["venmo_qr_data"],
-            cut_after=False
-        )
-        
-        # Store the generated app info for access by the UI
-        venmo_qr_manager.last_generated_app = {
-            "app_id": generated_app_details["app_id"],
-            "app_type": generated_app_details["app_type"],
-            "tier": generated_app_details["tier"],
-            "hosted_url_full": hosted_url_full,
-            "hosted_url_relative": hosted_url_relative,
-            "github_url": github_url,
-            "qr_code_image": qr_code_base64,
-            "message": f"App {generated_app_details['app_id']} generated successfully (Tier: {generated_app_details['tier']}).",
-            "readme_generated": "readme_path" in generated_app_details,
-            "timestamp": time.time(),
-            "logs": log_msg
-        }
-        
-        # Log the success
-        add_log(f"App generation completed: {app_type} (${payment_amount})", "info")
-        add_log(f"App available at: {hosted_url_full}", "info")
-        add_log(f"GitHub repository: {github_url}", "info")
-        
+            if not generated_app_details:
+                err_msg = f"Failed to generate app for payment: {app_type}"
+                add_log(err_msg, "error")
+                # Handle error with a cut - since we need to start a new flow
+                if thermal_printer_manager.initialized:
+                    thermal_printer_manager.print_text([
+                        "APP GENERATION FAILED",
+                        f"Request: {app_type}",
+                        f"Amount: ${payment_amount:.2f}",
+                        "We apologize for the inconvenience.",
+                        "Please see server logs for details.",
+                        "--------------------",
+                        time.strftime("%Y-%m-%d %H:%M:%S")
+                    ], align='left', cut=True)
+                # Release the generation lock
+                end_generation()
+                return
+            
+            app_id = generated_app_details["app_id"]
+            app_tier = generated_app_details["tier"]
+            actual_app_type = generated_app_details["app_type"] # Use type from details
+    
+            # Call GitHub Integration
+            github_url = github_service.push_to_github(
+                generated_app_details["path"], 
+                app_id,
+                actual_app_type
+            )
+            
+            # Prepare app generation details lines
+            app_details = [
+                f"App Type: {actual_app_type}",
+                f"Tier: {app_tier}",
+                f"ID: {app_id}"
+            ]
+    
+            # Add GitHub URL details
+            if "Error:" in github_url or "(Repo not found" in github_url or "(Permission denied" in github_url or "pat-not-set" in github_url:
+                app_details.append("GITHUB PUSH FAILED.")
+                app_details.append("App was generated locally.")
+            else:
+                app_details.append("GitHub Repository:")
+                app_details.append(github_url)
+    
+            # Generate base URL for hosted app using IP address
+            local_ip = get_local_ip()
+            base_url = os.getenv("EXTERNAL_HOST", f"http://{local_ip}:5002")
+            if not base_url.startswith(('http://', 'https://')):
+                base_url = f"http://{base_url}"
+                
+            hosted_url_relative = f"/apps/{app_id}/"
+            hosted_url_full = f"{base_url.strip('/')}{hosted_url_relative}"
+            
+            # Generate QR code for the app (for UI)
+            qr_code_base64 = generate_qr_code_base64(hosted_url_full)
+            
+            # Add app URL details and QR code
+            app_details.append("Access your app at:")
+            app_details.append(hosted_url_full)
+            
+            # Complete the receipt with the app generation details and cut the paper
+            if thermal_printer_manager.initialized:
+                thermal_printer_manager.print_continuous_receipt(
+                    app_generated_lines=app_details,
+                    app_url=hosted_url_full,  # Include the app URL for QR code
+                    cut_after=True
+                )
+                
+                # After cutting, start a new receipt with initial instructions
+                receipt_content = get_initial_receipt_content()
+                thermal_printer_manager.print_continuous_receipt(
+                    initial_setup_lines=receipt_content["initial_setup_lines"],
+                    venmo_qr_data=receipt_content["venmo_qr_data"],
+                    cut_after=False
+                )
+            
+            # Store the generated app info for access by the UI
+            venmo_qr_manager.last_generated_app = {
+                "app_id": generated_app_details["app_id"],
+                "app_type": generated_app_details["app_type"],
+                "tier": generated_app_details["tier"],
+                "hosted_url_full": hosted_url_full,
+                "hosted_url_relative": hosted_url_relative,
+                "github_url": github_url,
+                "qr_code_image": qr_code_base64,
+                "message": f"App {generated_app_details['app_id']} generated successfully (Tier: {generated_app_details['tier']}).",
+                "readme_generated": "readme_path" in generated_app_details,
+                "timestamp": time.time(),
+                "logs": log_msg
+            }
+            
+            # Log the success
+            add_log(f"App generation completed: {app_type} (${payment_amount})", "info")
+            add_log(f"App available at: {hosted_url_full}", "info")
+            add_log(f"GitHub repository: {github_url}", "info")
+            
+        finally:
+            # Always release the generation lock, even if there's an error
+            end_generation()
+            
     except Exception as e:
+        # Make sure we release the lock in case of any exceptions
+        end_generation()
         add_log(f"Error generating app from payment: {e}", "error")
 
 # --- Main Execution ---

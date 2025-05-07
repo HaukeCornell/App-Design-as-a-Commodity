@@ -567,6 +567,50 @@
 
                 const result = await response.json(); // Always try to parse JSON
 
+                // Handle cooldown/lock responses (HTTP 429)
+                if (response.status === 429) {
+                    const cooldownMsg = document.createElement("div");
+                    cooldownMsg.style.backgroundColor = "#fff3cd";
+                    cooldownMsg.style.color = "#856404";
+                    cooldownMsg.style.padding = "10px";
+                    cooldownMsg.style.borderRadius = "5px";
+                    cooldownMsg.style.marginTop = "15px";
+                    cooldownMsg.style.marginBottom = "15px";
+                    cooldownMsg.style.border = "1px solid #ffeeba";
+                    
+                    if (result.is_generating) {
+                        cooldownMsg.innerHTML = `<strong>Another app is currently being generated.</strong><br>Please wait until the current generation completes.`;
+                    } else {
+                        const remainingTime = Math.ceil(result.cooldown_seconds_remaining || 0);
+                        cooldownMsg.innerHTML = `<strong>Generation cooldown in effect.</strong><br>Please wait ${remainingTime} more seconds before generating another app.`;
+                    }
+                    
+                    statusDiv.innerHTML = "";
+                    statusDiv.appendChild(cooldownMsg);
+                    
+                    // Start a countdown timer if we have remaining time
+                    if (result.cooldown_seconds_remaining && !result.is_generating) {
+                        const remainingTime = Math.ceil(result.cooldown_seconds_remaining);
+                        let timeLeft = remainingTime;
+                        
+                        const timerSpan = document.createElement("span");
+                        timerSpan.textContent = `${timeLeft}`;
+                        cooldownMsg.innerHTML = `<strong>Generation cooldown in effect.</strong><br>Please wait <span id="cooldown-timer">${timeLeft}</span> more seconds before generating another app.`;
+                        
+                        const timer = setInterval(() => {
+                            timeLeft--;
+                            document.getElementById("cooldown-timer").textContent = timeLeft;
+                            
+                            if (timeLeft <= 0) {
+                                clearInterval(timer);
+                                statusDiv.textContent = "Ready to generate a new app.";
+                            }
+                        }, 1000);
+                    }
+                    
+                    return; // Exit early for cooldown/lock errors
+                }
+
                 if (!response.ok) {
                     throw new Error(result.error || `App generation failed with status ${response.status}.`);
                 }

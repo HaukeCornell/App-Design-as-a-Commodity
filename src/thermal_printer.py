@@ -3,17 +3,44 @@
 Thermal printer module for Vibe Coder application.
 This module handles communication with a thermal receipt printer using ESC/POS commands.
 """
+import os
 import logging
+import sys
 from escpos.printer import Usb
 from escpos.exceptions import USBNotFoundError, Error as EscposError
-from src.config import PRINTER_CONFIG
+
+# Fix import paths
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
+
+# Local imports
+from config import PRINTER_CONFIG
 
 # Import error handling
-from src.error_handling import (
-    PrinterError, 
-    ErrorCodes, 
-    exception_handler
-)
+try:
+    from error_handling import (
+        PrinterError, 
+        ErrorCodes, 
+        exception_handler
+    )
+except ImportError:
+    # Fallback error handling if module not found
+    class PrinterError(Exception):
+        pass
+    
+    class ErrorCodes:
+        PRINTER_CONNECTION_ERROR = 3000
+        PRINTER_COMMUNICATION_ERROR = 3001
+    
+    def exception_handler(func):
+        def wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                print(f"Error in {func.__name__}: {e}")
+                return None
+        return wrapper
 
 # Logger for printer specific messages
 printer_logger = logging.getLogger("thermal_printer")

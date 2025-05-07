@@ -17,6 +17,15 @@ import uuid
 import threading
 
 # Import helper modules
+import sys
+import os
+
+# Add the current directory to the path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
+
+# Now import with relative paths
 from thermal_printer import thermal_printer_manager
 from venmo_email import email_processor, init_email_monitoring
 from venmo_qr import venmo_qr_manager

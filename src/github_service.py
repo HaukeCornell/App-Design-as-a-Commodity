@@ -11,16 +11,50 @@ import logging
 import requests
 from typing import Dict, Optional, Any
 
+# Fix import paths
+import os
+import sys
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
+
 # Import configuration
-from src.config import GITHUB_CONFIG, GITHUB_PAT
+from config import GITHUB_CONFIG, GITHUB_PAT
 
 # Import error handling
-from src.error_handling import (
-    GitHubError, 
-    ErrorCodes, 
-    exception_handler, 
-    log_and_raise
-)
+try:
+    from error_handling import (
+        GitHubError, 
+        ErrorCodes, 
+        exception_handler, 
+        log_and_raise
+    )
+except ImportError:
+    # Fallback error handling
+    class GitHubError(Exception):
+        pass
+    
+    class ErrorCodes:
+        GITHUB_API_ERROR = 4000
+        GITHUB_AUTHENTICATION_ERROR = 4001
+        GITHUB_REPO_EXISTS = 4002
+        GITHUB_REPO_CREATION_ERROR = 4003
+        GIT_COMMAND_ERROR = 4004
+    
+    def exception_handler(func):
+        def wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                print(f"Error in {func.__name__}: {e}")
+                return None
+        return wrapper
+        
+    def log_and_raise(error_class, message, log_level=logging.ERROR, code=None, details=None, original_exception=None):
+        print(f"{log_level}: {message}")
+        if original_exception:
+            print(f"Caused by: {original_exception}")
+        raise error_class(message)
 
 # Set up logging
 logger = logging.getLogger("github_service")

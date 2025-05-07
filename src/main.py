@@ -1,128 +1,43 @@
-import sys
+#!/usr/bin/env python3.11
+"""
+Main application for Vibe Coder.
+This is the entry point for the application.
+"""
 import os
-from dotenv import load_dotenv
-import logging # Added import for logging
-
-# Load environment variables from .env file
-load_dotenv()
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-
+import sys
+import time
+import logging
 from flask import Flask, request, jsonify, send_from_directory, url_for, render_template, redirect
-import json
-import subprocess
-import shutil
 import qrcode
 import io
 import base64
-import time # For potential delays
-import threading
+import subprocess
+import shutil
 import uuid
+import threading
 
-# Import escpos library
-from escpos.printer import Usb
-from escpos.exceptions import USBNotFoundError, Error as EscposError
-
-# Import the app generator function
-from src.app_generator import generate_app_files
-
-# Import Venmo related modules
-from src.venmo_email import email_processor, init_email_monitoring
-from src.venmo_qr import venmo_qr_manager
-from src.venmo_config import VENMO_CONFIG, EMAIL_CONFIG
+# Import helper modules
+from thermal_printer import thermal_printer_manager
+from venmo_email import email_processor, init_email_monitoring
+from venmo_qr import venmo_qr_manager
+from venmo_config import VENMO_CONFIG, EMAIL_CONFIG
+from github_service import github_service
+from app_generator import generate_app_files
 
 # --- App Initialization ---
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__, static_folder="static", static_url_path="", template_folder="templates")
 GENERATED_APPS_DIR = os.path.abspath(os.path.join(_SCRIPT_DIR, "generated_apps"))
 
-# --- Thermal Printer Configuration ---
-thermal_printer = None
-# Epson TM-T20 series typically use these IDs. Verify with `lsusb` if issues arise.
-
-PRINTER_VENDOR_ID = 0x04b8
-PRINTER_PRODUCT_ID = 0x0e03 # Updated to 0x0e03 based on user's System Information
-# PRINTER_PROFILE = "TM-T20" # Profile for TM-T20 series - Commented out original
-
-# Logger for printer specific messages (will be captured by root logger's handler)
-printer_logger = logging.getLogger("thermal_printer")
-
+# Initialize the thermal printer
 def init_thermal_printer():
-    """Initializes connection to the thermal printer."""
-    global thermal_printer
-    # Try the specific profiles for TM-T20II and 'default'
-    printer_profiles_to_try = ["TM-T20II", "TM-T20II-42col", "default"]
-
-    for profile_name in printer_profiles_to_try:
-        try:
-            printer_logger.info(f"Attempting to connect to thermal printer: Vendor ID 0x{PRINTER_VENDOR_ID:04x}, Product ID 0x{PRINTER_PRODUCT_ID:04x}, Profile: {profile_name}")
-            thermal_printer = Usb(PRINTER_VENDOR_ID, PRINTER_PRODUCT_ID, 0, profile=profile_name)
-            
-            thermal_printer.hw("INIT")
-            printer_logger.info(f"Thermal printer connected and initialized successfully (Profile: {profile_name}).")
-            # Removed text_type from set() call
-            thermal_printer.set(align='center', width=1, height=1, density=9) 
-            return
-        except USBNotFoundError:
-            printer_logger.error("Thermal printer not found by USB system. Please ensure it is connected, powered on, and Vendor/Product IDs are correct.")
-            thermal_printer = None
-            return # Stop trying if USB device not found at all
-        except Exception as e:
-            printer_logger.warning(f"Failed to connect or initialize with profile '{profile_name}': {e}")
-            thermal_printer = None
-            # Continue to the next profile in the list
-
-    if not thermal_printer:
-        printer_logger.error("Could not connect to thermal printer with the specified profiles (TM-T20II, TM-T20II-42col). Check USB connection, IDs, and ensure libusb is installed if necessary.")
-
-def safe_print_text(lines: list[str], align: str = 'center', cut: bool = False, text_type: str = 'NORMAL', width: int = 1, height: int = 1):
-    """Safely prints text lines to the thermal printer."""
-    if thermal_printer:
-        try:
-            # Removed text_type from set() call, width and height are passed directly if needed by textln or other methods
-            thermal_printer.set(align=align, width=width, height=height)
-            for line in lines:
-                thermal_printer.textln(line)
-            if cut:
-                thermal_printer.cut()
-        except EscposError as e:
-            printer_logger.error(f"ESC/POS library error during text printing: {e}")
-        except Exception as e:
-            printer_logger.error(f"Unexpected error during text printing: {e}")
-    else:
-        # Log to console if printer not available, as this is a primary interface
-        print("[NO PRINTER] " + "\n[NO PRINTER] ".join(lines))
-        printer_logger.warning("Thermal printer not available, skipping text print. Logged to console.")
-
-def safe_print_qr(data: str, text_above: str = None, text_below: str = None, align: str = 'center', size: int = 6, cut: bool = False):
-    """Safely prints a QR code to the thermal printer."""
-    if thermal_printer:
-        try:
-            thermal_printer.set(align=align)
-            if text_above:
-                thermal_printer.textln(text_above)
-            thermal_printer.qr(data, size=size)
-            if text_below:
-                thermal_printer.textln(text_below)
-            if cut:
-                thermal_printer.cut()
-        except EscposError as e:
-            printer_logger.error(f"ESC/POS library error during QR printing: {e}")
-        except Exception as e:
-            printer_logger.error(f"Unexpected error during QR printing: {e}")
-    else:
-        qr_message = f"QR Data: {data}"
-        if text_above: qr_message = f"{text_above}\n{qr_message}"
-        if text_below: qr_message = f"{qr_message}\n{text_below}"
-        print(f"[NO PRINTER] {qr_message}")
-        printer_logger.warning("Thermal printer not available, skipping QR print. Logged to console.")
+    """Initialize the thermal printer."""
+    return thermal_printer_manager.initialize()
 
 # Initialize Venmo QR manager with email monitoring
 def init_venmo_system():
     """Initialize the Venmo payment system on startup."""
     print("Initializing Venmo payment system...")
-    # We'll set the correct base URL when the first request comes in
-    # This prevents using localhost in production
     venmo_qr_manager.set_base_url(None)
     
     # Display email configuration status
@@ -143,170 +58,6 @@ def init_venmo_system():
     
     # Start email monitoring in the background
     init_email_monitoring()
-
-# --- GitHub Configuration --- 
-# --- IMPORTANT: Load PAT from environment variable --- 
-GITHUB_PAT = os.getenv("GITHUB_PAT")
-GITHUB_USERNAME = "sandvibe" # User provided username
-
-if not GITHUB_PAT:
-    print("Warning: GITHUB_PAT environment variable not set. GitHub integration will likely fail.")
-
-def create_github_repo(repo_name: str) -> bool:
-    """Creates a new GitHub repository using GitHub API."""
-    if not GITHUB_PAT:
-        print("[GitHub Integration] Error: GitHub PAT not set.")
-        return False
-        
-    try:
-        # Log creation attempt with specific account
-        print(f"[GitHub Integration] Creating repository: {repo_name} for user: {GITHUB_USERNAME}")
-        
-        # Set up the authorization headers
-        headers = {
-            "Authorization": f"token {GITHUB_PAT}",
-            "Accept": "application/vnd.github.v3+json"
-        }
-        
-        # Repository data
-        data = {
-            "name": repo_name,
-            "description": f"App generated by Vibe Coder - {time.strftime('%Y-%m-%d')}",
-            "private": False,
-            "auto_init": False,  # Don't initialize with README
-            "has_issues": True,
-            "has_projects": False,
-            "has_wiki": False
-        }
-        
-        # Create repository using GitHub API
-        import requests
-        # Use the specific endpoint to create the repo
-        response = requests.post(f"https://api.github.com/user/repos", headers=headers, json=data)
-        
-        # Check response
-        if response.status_code == 201:
-            print(f"[GitHub Integration] Successfully created repository: {repo_name} for user: {GITHUB_USERNAME}")
-            print(f"[GitHub Integration] Repository URL: https://github.com/{GITHUB_USERNAME}/{repo_name}")
-            return True
-        else:
-            print(f"[GitHub Integration] Failed to create repository: {repo_name}. Status code: {response.status_code}")
-            print(f"[GitHub Integration] Response: {response.text}")
-            
-            # If there's a 422 error, the repo might already exist
-            if response.status_code == 422 and "already exists" in response.text:
-                print(f"[GitHub Integration] Repository already exists, will attempt to push anyway.")
-                return True
-                
-            return False
-            
-    except Exception as e:
-        print(f"[GitHub Integration] Error creating repository: {e}")
-        return False
-
-def push_to_github_real(app_path: str, app_id: str, app_type: str) -> str:
-    """Pushes the generated app code to a new GitHub repository using git commands and PAT."""
-    if not GITHUB_PAT:
-        print("[GitHub Integration] Error: GitHub PAT not set.")
-        return "https://github.com/error/pat-not-set"
-        
-    repo_name = f"vibe-coded-app-{app_id}"
-    repo_url = f"https://github.com/{GITHUB_USERNAME}/{repo_name}"
-    git_url = f"{repo_url}.git"
-    # Use PAT for authentication in the URL
-    authenticated_repo_url = f"https://{GITHUB_USERNAME}:{GITHUB_PAT}@github.com/{GITHUB_USERNAME}/{repo_name}.git"
-    commit_message = f"Add {app_type} app ({app_id}) generated by Vibe Coder"
-
-    print(f"[GitHub Integration] Attempting to push code from {app_path} to {repo_url}")
-    print(f"[GitHub Integration] Using account: {GITHUB_USERNAME}")
-    
-    # First create the repository
-    repo_created = create_github_repo(repo_name)
-    if not repo_created:
-        print(f"[GitHub Integration] Warning: Could not create repository {repo_name}. Will attempt to push anyway.")
-
-    try:
-        # Check if git is initialized, if so, remove .git dir to avoid nesting issues
-        git_dir = os.path.join(app_path, ".git")
-        if os.path.exists(git_dir):
-            print("[GitHub Integration] Removing existing .git directory.")
-            shutil.rmtree(git_dir)
-            time.sleep(0.5) # Small delay to ensure directory is removed
-
-        # Initialize git repo
-        print("[GitHub Integration] Initializing git repository...")
-        subprocess.run(["git", "init"], cwd=app_path, check=True, capture_output=True, text=True)
-        
-        # Configure git user (temporary for this repo)
-        subprocess.run(["git", "config", "user.name", "Vibe Coder Bot"], cwd=app_path, check=True)
-        subprocess.run(["git", "config", "user.email", "noreply@vibe.coder"], cwd=app_path, check=True)
-
-        # Add files
-        print("[GitHub Integration] Adding files...")
-        subprocess.run(["git", "add", "."], cwd=app_path, check=True, capture_output=True, text=True)
-
-        # Commit
-        print("[GitHub Integration] Committing files...")
-        commit_result = subprocess.run(["git", "commit", "-m", commit_message], cwd=app_path, check=False, capture_output=True, text=True)
-        
-        if commit_result.returncode != 0:
-            if "nothing to commit" in commit_result.stdout.lower() or "nothing to commit" in commit_result.stderr.lower():
-                print("[GitHub Integration] Nothing to commit. Adding empty README to force commit.")
-                with open(os.path.join(app_path, "README.md"), "a") as f:
-                    f.write("\n\nGenerated at: " + time.strftime("%Y-%m-%d %H:%M:%S"))
-                subprocess.run(["git", "add", "README.md"], cwd=app_path, check=True, capture_output=True, text=True)
-                subprocess.run(["git", "commit", "-m", commit_message], cwd=app_path, check=True, capture_output=True, text=True)
-            else:
-                print(f"[GitHub Integration] Commit failed: {commit_result.stderr}")
-                raise subprocess.CalledProcessError(commit_result.returncode, commit_result.args, stderr=commit_result.stderr)
-
-        # Rename branch to main
-        subprocess.run(["git", "branch", "-M", "main"], cwd=app_path, check=True, capture_output=True, text=True)
-
-        # Add remote origin
-        print(f"[GitHub Integration] Adding remote origin: {git_url}")
-        # Remove existing remote origin if it exists to avoid error
-        subprocess.run(["git", "remote", "remove", "origin"], cwd=app_path, check=False, capture_output=True, text=True)
-        subprocess.run(["git", "remote", "add", "origin", authenticated_repo_url], cwd=app_path, check=True, capture_output=True, text=True)
-
-        # Push to GitHub
-        print("[GitHub Integration] Pushing to GitHub...")
-        push_result = subprocess.run(["git", "push", "-u", "origin", "main"], cwd=app_path, check=False, capture_output=True, text=True) # check=False to handle repo not found
-
-        if push_result.returncode != 0:
-            if "repository not found" in push_result.stderr.lower():
-                print(f"[GitHub Integration] Repository {repo_url} not found. Please verify the GitHub account and token.")
-                return f"{repo_url} (Repo not found - please verify account permissions)"
-            elif "permission to" in push_result.stderr.lower() and "denied" in push_result.stderr.lower():
-                print(f"[GitHub Integration] Permission denied. Please verify the GitHub token has correct permissions.")
-                return f"{repo_url} (Permission denied - check token permissions)"
-            else:
-                print(f"[GitHub Integration] Push failed: {push_result.stderr}")
-                raise subprocess.CalledProcessError(push_result.returncode, push_result.args, stderr=push_result.stderr)
-        
-        print(f"[GitHub Integration] Successfully pushed {app_id} to {repo_url}")
-        return repo_url
-
-    except subprocess.CalledProcessError as e:
-        print(f"[GitHub Integration] Failed during git operation: {e}")
-        print(f"Command: {' '.join(e.cmd)}")
-        print(f"Stderr: {e.stderr}")
-        return f"{repo_url} (Error: {str(e).split(':', 1)[0]})"
-    except FileNotFoundError:
-         print("[GitHub Integration] Failed: git command not found. Ensure it is installed and in PATH.")
-         return f"{repo_url} (Error: git command not found)"
-    except Exception as e:
-        print(f"[GitHub Integration] An unexpected error occurred: {e}")
-        return f"{repo_url} (Error: {str(e)[:50]})"
-    finally:
-        # Clean up .git directory after push to prevent issues if run again in same dir
-        git_dir = os.path.join(app_path, ".git")
-        if os.path.exists(git_dir):
-            try:
-                shutil.rmtree(git_dir)
-                print("[GitHub Integration] Cleaned up .git directory.")
-            except Exception as e:
-                 print(f"[GitHub Integration] Warning: Failed to clean up .git directory: {e}")
 
 # --- QR Code Generation --- 
 def generate_qr_code_base64(url: str) -> str:
@@ -357,30 +108,7 @@ def add_log(message, level="info"):
     
     return log_entry
 
-# Monkey patch the logger handlers to capture logs
-import logging
-class ApplicationLogHandler(logging.Handler):
-    def emit(self, record):
-        level = record.levelname.lower()
-        if level == 'critical':
-            level = 'error'  # Map critical to error for UI
-        add_log(record.getMessage(), level)
-
-# Set up logging to capture log messages
-root_logger = logging.getLogger()
-root_logger.setLevel(logging.INFO)
-root_logger.addHandler(ApplicationLogHandler())
-
-# Configure logging levels for verbose modules
-for logger_name in ["venmo_email", "venmo_qr"]:
-    logger = logging.getLogger(logger_name)
-    # Set to WARNING to reduce console output - use DEBUG for development
-    logger.setLevel(logging.WARNING)
-    # Still capture important logs for the UI
-    logger.addHandler(ApplicationLogHandler())
-
 # --- Routes --- 
-
 @app.route("/")
 def index():
     """Serve the main HTML page."""
@@ -391,7 +119,7 @@ def venmo_scanned():
     """Handle notification that someone scanned the Venmo QR code."""
     # Log the scan
     add_log("Someone scanned the Venmo QR code", "info")
-    safe_print_text([
+    thermal_printer_manager.print_text([
         "VENMO QR SCANNED!",
         "User is at the payment step.",
         "Waiting for Venmo email...",
@@ -522,7 +250,7 @@ def generate_app_route():
             return jsonify({"error": f"Failed to generate app code for type: {app_type}"}), 500
 
         # Call GitHub Integration (Step 005 - Real)
-        github_url = push_to_github_real(
+        github_url = github_service.push_to_github(
             generated_app_details["path"], 
             generated_app_details["app_id"],
             generated_app_details["app_type"]
@@ -559,7 +287,7 @@ def generate_app_route():
         # Get actual model info from app_generator
         import sys
         sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-        from src.app_generator import model
+        from app_generator import model
         
         model_name = "gemini-1.5-pro-latest"
         if model and hasattr(model, "_model_name"):
@@ -582,7 +310,7 @@ def generate_app_route():
             filtered_logs.append(log)
         
         # Get the recent logs after filtering
-        recent_logs = filtered_logs[-8:] if len(filtered_logs > 0) else []
+        recent_logs = filtered_logs[-8:] if filtered_logs else []
         log_entries = [f"{log['message']}" for log in recent_logs]
         
         # Combine AI info with log messages
@@ -638,7 +366,7 @@ def generate_app_for_payment(app_type: str, payment_amount: float, user_who_paid
     try:
         log_msg = f"Starting app generation for payment: '{app_type}' (${payment_amount:.2f}) from '{user_who_paid}'"
         add_log(log_msg, "info")
-        safe_print_text([
+        thermal_printer_manager.print_text([
             "PAYMENT RECEIVED!",
             f"User: {user_who_paid}",
             f"Amount: ${payment_amount:.2f}",
@@ -654,7 +382,7 @@ def generate_app_for_payment(app_type: str, payment_amount: float, user_who_paid
         if not generated_app_details:
             err_msg = f"Failed to generate app for payment: {app_type}"
             add_log(err_msg, "error")
-            safe_print_text([
+            thermal_printer_manager.print_text([
                 "APP GENERATION FAILED",
                 f"Request: {app_type}",
                 f"Amount: ${payment_amount:.2f}",
@@ -669,7 +397,7 @@ def generate_app_for_payment(app_type: str, payment_amount: float, user_who_paid
         app_tier = generated_app_details["tier"]
         actual_app_type = generated_app_details["app_type"] # Use type from details
 
-        safe_print_text([
+        thermal_printer_manager.print_text([
             f"APP '{actual_app_type}' GENERATED!",
             f"Tier: {app_tier}",
             f"ID: {app_id}",
@@ -678,7 +406,7 @@ def generate_app_for_payment(app_type: str, payment_amount: float, user_who_paid
         ], align='left') # No cut yet, more details to follow
 
         # Call GitHub Integration
-        github_url = push_to_github_real(
+        github_url = github_service.push_to_github(
             generated_app_details["path"], 
             app_id,
             actual_app_type
@@ -686,13 +414,13 @@ def generate_app_for_payment(app_type: str, payment_amount: float, user_who_paid
         
         # Check for common error indicators in the returned GitHub URL string
         if "Error:" in github_url or "(Repo not found" in github_url or "(Permission denied" in github_url or "pat-not-set" in github_url:
-            safe_print_text([
+            thermal_printer_manager.print_text([
                 "GITHUB PUSH FAILED.",
                 "Details in server logs.",
                 "App was generated locally.",
             ], align='left')
         else:
-            safe_print_text([
+            thermal_printer_manager.print_text([
                 "Pushed to GitHub successfully!",
                  github_url, # This might be long, but good for a receipt
             ], align='left')
@@ -721,16 +449,16 @@ def generate_app_for_payment(app_type: str, payment_amount: float, user_who_paid
         # Generate QR code for the app (for UI)
         qr_code_base64 = generate_qr_code_base64(hosted_url_full)
         
-        safe_print_text([
+        thermal_printer_manager.print_text([
             "--------------------",
             "YOUR APP IS READY!",
             "Access URL:",
             # hosted_url_full, # URL printed by QR function's text_below
             "Scan QR code below to view:",
         ], align='left')
-        safe_print_qr(hosted_url_full, text_below=f"{actual_app_type} ({app_id})", cut=False) # Add app type to QR text
+        thermal_printer_manager.print_qr(hosted_url_full, text_below=f"{actual_app_type} ({app_id})", cut=False) # Add app type to QR text
 
-        safe_print_text([
+        thermal_printer_manager.print_text([
             "--------------------",
             "Thank you for using Vibe Coder!",
             time.strftime("%Y-%m-%d %H:%M:%S")
@@ -766,8 +494,8 @@ if __name__ == "__main__":
     # Initialize the Thermal Printer System
     init_thermal_printer()
     
-    if thermal_printer:
-        safe_print_text([
+    if thermal_printer_manager.initialized:
+        thermal_printer_manager.print_text([
             "VIBE CODER",
             "Thermal Receipt System Online",
             "--------------------",

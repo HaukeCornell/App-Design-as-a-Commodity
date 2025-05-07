@@ -1,0 +1,284 @@
+#!/usr/bin/env python3.11
+"""
+Thermal printer module for Vibe Coder application.
+This module handles communication with a thermal receipt printer using ESC/POS commands.
+"""
+import logging
+from escpos.printer import Usb
+from escpos.exceptions import USBNotFoundError, Error as EscposError
+from src.config import PRINTER_CONFIG
+
+# Import error handling
+from src.error_handling import (
+    PrinterError, 
+    ErrorCodes, 
+    exception_handler
+)
+
+# Logger for printer specific messages
+printer_logger = logging.getLogger("thermal_printer")
+
+class ThermalPrinter:
+    """Class to handle thermal printer operations."""
+    
+    def __init__(self, vendor_id=None, product_id=None):
+        """
+        Initialize the thermal printer with specified USB identifiers.
+        
+        Args:
+            vendor_id: USB vendor ID (default: from config)
+            product_id: USB product ID (default: from config)
+        """
+        self.printer = None
+        self.vendor_id = vendor_id if vendor_id is not None else PRINTER_CONFIG["vendor_id"]
+        self.product_id = product_id if product_id is not None else PRINTER_CONFIG["product_id"]
+        self.initialized = False
+        
+    @exception_handler
+    def initialize(self):
+        """
+        Initialize connection to the thermal printer with profile fallbacks.
+        
+        Returns:
+            True if successfully initialized, False otherwise
+            
+        Raises:
+            PrinterError: If printer initialization fails
+        """
+        # Try different printer profiles in case one works better than others
+        printer_profiles_to_try = PRINTER_CONFIG.get("profiles", ["TM-T20II", "TM-T20II-42col", "default"])
+
+        for profile_name in printer_profiles_to_try:
+            try:
+                printer_logger.info(
+                    f"Attempting to connect to thermal printer: "
+                    f"Vendor ID 0x{self.vendor_id:04x}, "
+                    f"Product ID 0x{self.product_id:04x}, "
+                    f"Profile: {profile_name}"
+                )
+                
+                self.printer = Usb(self.vendor_id, self.product_id, 0, profile=profile_name)
+                
+                # Initialize the printer hardware
+                self.printer.hw("INIT")
+                printer_logger.info(f"Thermal printer connected and initialized successfully (Profile: {profile_name}).")
+                
+                # Set default formatting
+                self.printer.set(align='center', width=1, height=1, density=9)
+                
+                self.initialized = True
+                return True
+                
+            except USBNotFoundError as e:
+                printer_logger.error(
+                    "Thermal printer not found by USB system. "
+                    "Please ensure it is connected, powered on, and Vendor/Product IDs are correct."
+                )
+                self.printer = None
+                
+                if profile_name == printer_profiles_to_try[-1]:
+                    # Only raise exception if we've tried all profiles
+                    raise PrinterError(
+                        "Thermal printer not found by USB system",
+                        code=ErrorCodes.PRINTER_CONNECTION_ERROR,
+                        details={
+                            'vendor_id': f"0x{self.vendor_id:04x}", 
+                            'product_id': f"0x{self.product_id:04x}"
+                        },
+                        original_exception=e
+                    )
+                return False
+                
+            except EscposError as e:
+                printer_logger.warning(f"ESC/POS error with profile '{profile_name}': {e}")
+                self.printer = None
+                # Continue to the next profile
+                
+            except Exception as e:
+                printer_logger.warning(f"Failed to connect or initialize with profile '{profile_name}': {e}")
+                self.printer = None
+                # Continue to the next profile in the list
+
+        if not self.initialized:
+            printer_logger.error(
+                "Could not connect to thermal printer with the specified profiles. "
+                "Check USB connection, IDs, and ensure libusb is installed if necessary."
+            )
+            return False
+            
+        return False
+
+    @exception_handler
+    def print_text(self, lines, align='center', cut=False, width=1, height=1):
+        """
+        Print text lines to the thermal printer.
+        
+        Args:
+            lines: List of strings to print
+            align: Text alignment ('left', 'center', 'right')
+            cut: Whether to cut the paper after printing
+            width: Text width multiplier
+            height: Text height multiplier
+        
+        Returns:
+            True if successful, False otherwise
+            
+        Raises:
+            PrinterError: If printing fails
+        """
+        if not self.initialized or not self.printer:
+            # Log to console if printer not available
+            print("[NO PRINTER] " + "\n[NO PRINTER] ".join(lines))
+            printer_logger.warning("Thermal printer not available, skipping text print. Logged to console.")
+            return False
+            
+        try:
+            self.printer.set(align=align, width=width, height=height)
+            
+            for line in lines:
+                self.printer.textln(line)
+                
+            if cut:
+                self.printer.cut()
+                
+            return True
+            
+        except EscposError as e:
+            raise PrinterError(
+                f"ESC/POS library error during text printing: {e}",
+                code=ErrorCodes.PRINTER_COMMUNICATION_ERROR,
+                details={'lines_count': len(lines)},
+                original_exception=e
+            )
+            
+        except Exception as e:
+            raise PrinterError(
+                f"Unexpected error during text printing: {e}",
+                code=ErrorCodes.PRINTER_COMMUNICATION_ERROR,
+                details={'lines_count': len(lines)},
+                original_exception=e
+            )
+
+    def print_qr(self, data, text_above=None, text_below=None, align='center', size=6, cut=False):
+        """
+        Print a QR code to the thermal printer with optional text.
+        
+        Args:
+            data: QR code content
+            text_above: Text to print above the QR code
+            text_below: Text to print below the QR code
+            align: Text alignment ('left', 'center', 'right')
+            size: QR code size (1-16)
+            cut: Whether to cut the paper after printing
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.initialized or not self.printer:
+            # Log to console if printer not available
+            qr_message = f"QR Data: {data}"
+            if text_above: 
+                qr_message = f"{text_above}\n{qr_message}"
+            if text_below: 
+                qr_message = f"{qr_message}\n{text_below}"
+            
+            print(f"[NO PRINTER] {qr_message}")
+            printer_logger.warning("Thermal printer not available, skipping QR print. Logged to console.")
+            return False
+            
+        try:
+            self.printer.set(align=align)
+            
+            if text_above:
+                self.printer.textln(text_above)
+                
+            self.printer.qr(data, size=size)
+            
+            if text_below:
+                self.printer.textln(text_below)
+                
+            if cut:
+                self.printer.cut()
+                
+            return True
+                
+        except EscposError as e:
+            printer_logger.error(f"ESC/POS library error during QR printing: {e}")
+            return False
+            
+        except Exception as e:
+            printer_logger.error(f"Unexpected error during QR printing: {e}")
+            return False
+
+    def print_receipt(self, header_lines, body_lines, footer_lines, cut=True):
+        """
+        Print a complete receipt with header, body, and footer sections.
+        
+        Args:
+            header_lines: List of strings for the receipt header
+            body_lines: List of strings for the receipt body
+            footer_lines: List of strings for the receipt footer
+            cut: Whether to cut the paper after printing
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.initialized or not self.printer:
+            # Log to console if printer not available
+            combined_lines = header_lines + ["---"] + body_lines + ["---"] + footer_lines
+            print("[NO PRINTER] " + "\n[NO PRINTER] ".join(combined_lines))
+            printer_logger.warning("Thermal printer not available, skipping receipt print. Logged to console.")
+            return False
+            
+        try:
+            # Print header centered, possibly larger
+            self.printer.set(align='center', width=1, height=1)
+            for line in header_lines:
+                self.printer.textln(line)
+                
+            # Separator line
+            self.printer.text("--------------------\n")
+                
+            # Print body left-aligned, normal size
+            self.printer.set(align='left', width=1, height=1)
+            for line in body_lines:
+                self.printer.textln(line)
+                
+            # Separator line
+            self.printer.text("--------------------\n")
+                
+            # Print footer centered, normal size
+            self.printer.set(align='center', width=1, height=1)
+            for line in footer_lines:
+                self.printer.textln(line)
+                
+            if cut:
+                self.printer.cut()
+                
+            return True
+                
+        except EscposError as e:
+            printer_logger.error(f"ESC/POS library error during receipt printing: {e}")
+            return False
+            
+        except Exception as e:
+            printer_logger.error(f"Unexpected error during receipt printing: {e}")
+            return False
+
+    def close(self):
+        """Close the connection to the printer."""
+        try:
+            if self.printer:
+                # No explicit close method in escpos, but we can reset some settings
+                self.printer.hw('INIT')
+                self.printer = None
+                self.initialized = False
+                printer_logger.info("Thermal printer connection closed")
+                return True
+        except Exception as e:
+            printer_logger.error(f"Error closing printer connection: {e}")
+        
+        return False
+
+# Create singleton instance for importing in other modules
+thermal_printer_manager = ThermalPrinter()

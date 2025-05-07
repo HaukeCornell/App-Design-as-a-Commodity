@@ -3,21 +3,14 @@ import os
 import uuid
 import google.generativeai as genai
 import re
-import sys # Added for path manipulation
+import sys
 import time
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
-load_dotenv()
+# Import central configuration
+from src.config import GENERATED_APPS_DIR, GEMINI_API_KEY, GEMINI_MODELS, APP_TIERS, get_app_tier
 
-# --- Configuration ---
-# Get the absolute path of the directory containing this script
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-GENERATED_APPS_DIR = os.path.abspath(os.path.join(_SCRIPT_DIR, "generated_apps"))
-
-# --- IMPORTANT: Load API keys from environment variables --- 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-
+# Ensure generated apps directory exists
 os.makedirs(GENERATED_APPS_DIR, exist_ok=True)
 
 # Configure the Gemini client
@@ -27,11 +20,11 @@ if not GEMINI_API_KEY:
 else:
     try:
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-1.5-pro-latest") # Using 1.5 Pro as the default model
+        model = genai.GenerativeModel(GEMINI_MODELS["default"])
         print("Gemini API configured successfully.")
     except Exception as e:
         print(f"Error configuring Gemini API: {e}")
-        model = None # Set model to None if configuration fails
+        model = None  # Set model to None if configuration fails
 
 def generate_code_with_gemini(app_type: str, tier: str, readme_content: str) -> str | None:
     """Generates HTML/CSS/JS code using Gemini based on app type, tier, and README content."""
@@ -40,7 +33,8 @@ def generate_code_with_gemini(app_type: str, tier: str, readme_content: str) -> 
         return None
     
     # Select model based on tier
-    model_to_use = genai.GenerativeModel("gemini-2.5-pro-preview-03-25") if tier == "high" else genai.GenerativeModel("gemini-2.5-flash-preview-04-17")
+    model_name = APP_TIERS[tier]["model"]
+    model_to_use = genai.GenerativeModel(model_name)
     
     prompt = (
         f"Create a complete, single-file HTML web application based on the following README.md content:\n\n"
@@ -94,7 +88,7 @@ def generate_readme_with_gemini(app_type: str, amount: float, tier: str, app_id:
         return None
     
     # Always use Flash for README generation as per requirements
-    model_to_use = genai.GenerativeModel("gemini-1.5-flash-latest")
+    model_to_use = genai.GenerativeModel(GEMINI_MODELS["readme"])
     
     # Get current date in readable format
     current_date = time.strftime("%B %d, %Y")
@@ -150,7 +144,7 @@ def generate_app_files(app_type: str, amount: float) -> dict | None:
     readme_path = os.path.join(app_dir, "README.md")
 
     # Determine tier based on amount
-    tier = "high" if amount >= 5.0 else "low"
+    tier = get_app_tier(amount)
 
     # Generate README.md using Gemini Flash first
     generated_readme = generate_readme_with_gemini(app_type, amount, tier, app_id)

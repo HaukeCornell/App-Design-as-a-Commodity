@@ -112,6 +112,17 @@
             transform: translateX(26px);
         }
         
+        .payment-mode-container {
+            background-color: #f0f8ff;
+            border: 1px solid #2196F3;
+            padding: 10px 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
         .email-status {
             display: inline-block;
             margin-left: 15px;
@@ -269,7 +280,7 @@
     
     <div class="tabs">
         <div class="tab active" data-tab="manual">Manual Generation</div>
-        <div class="tab" data-tab="venmo">Venmo Email Monitor</div>
+        <div class="tab" data-tab="venmo">Payment Monitor</div>
     </div>
     
     <div id="manual-tab" class="tab-content active">
@@ -294,6 +305,21 @@
     
     <div id="venmo-tab" class="tab-content">
         <h2 style="text-align: center;">App Design as a Commodity</h2>
+        
+        <div class="payment-mode-container">
+            <div>
+                <strong>Payment Mode:</strong>
+                <span id="payment-mode-label">Venmo</span>
+            </div>
+            <div style="display: flex; align-items: center;">
+                <span style="margin-right: 10px;">VibePay</span>
+                <label class="toggle-switch" for="payment-mode-toggle">
+                    <input type="checkbox" id="payment-mode-toggle" checked>
+                    <span class="slider"></span>
+                </label>
+                <span style="margin-left: 10px;">Venmo</span>
+            </div>
+        </div>
         
         <div class="receipt-paper" id="instructions-receipt">
             <div class="receipt-header">
@@ -361,6 +387,70 @@
     </div>
 
     <script>
+        // Payment mode toggle functionality
+        const paymentModeToggle = document.getElementById('payment-mode-toggle');
+        const paymentModeLabel = document.getElementById('payment-mode-label');
+        
+        // Initialize the payment mode based on server state
+        async function initPaymentMode() {
+            try {
+                const response = await fetch("/api/email-status");
+                const result = await response.json();
+                
+                if (response.ok && result.payment_mode) {
+                    // Set the toggle state based on the current mode
+                    const isVenmo = result.payment_mode === "venmo";
+                    paymentModeToggle.checked = isVenmo;
+                    paymentModeLabel.textContent = isVenmo ? "Venmo" : "VibePay";
+                    
+                    // Add the initial log
+                    addLog(`Current payment mode: ${isVenmo ? "Venmo" : "VibePay"}`);
+                }
+            } catch (error) {
+                console.error("Error getting payment mode:", error);
+            }
+        }
+        
+        // Handle payment mode toggle changes
+        paymentModeToggle.addEventListener('change', async function() {
+            const isVenmo = this.checked;
+            const newMode = isVenmo ? "venmo" : "vibepay";
+            
+            try {
+                // Update the label immediately for responsive UI
+                paymentModeLabel.textContent = isVenmo ? "Venmo" : "VibePay";
+                
+                // Send the request to update the mode
+                const response = await fetch("/api/toggle-payment-mode", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({ mode: newMode })
+                });
+                
+                const result = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(result.error || "Failed to update payment mode");
+                }
+                
+                // Update the UI with the new mode
+                addLog(`Payment mode switched to ${isVenmo ? "Venmo" : "VibePay"}`);
+                
+                // Force a refresh of the QR code
+                checkEmailStatus();
+                
+            } catch (error) {
+                addLog(`Error switching payment mode: ${error.message}`, 'error');
+                console.error("Error:", error);
+                
+                // Revert the toggle if there was an error
+                this.checked = !this.checked;
+                paymentModeLabel.textContent = this.checked ? "Venmo" : "VibePay";
+            }
+        });
+        
         // Simple auto-check for updates every second
         setInterval(function() {
             // If we're on the Venmo tab, check for app updates
@@ -951,9 +1041,12 @@
         // Add log message to the log area
         // Initialize the page and add default log message
         window.addEventListener('DOMContentLoaded', function() {
+            // Initialize payment mode
+            initPaymentMode();
+            
             // Add initial log message
             if (emailLog && emailLog.childElementCount === 0) {
-                addLog("System ready. Waiting for Venmo payments...");
+                addLog("System ready. Waiting for payments...");
             }
             
             // Check if the Venmo tab is already active

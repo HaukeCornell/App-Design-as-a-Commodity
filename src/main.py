@@ -38,6 +38,19 @@ _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__, static_folder="static", static_url_path="", template_folder="templates")
 GENERATED_APPS_DIR = os.path.abspath(os.path.join(_SCRIPT_DIR, "generated_apps"))
 
+# Payment mode configuration
+PAYMENT_MODE = {
+    "current_mode": "venmo",  # "venmo" or "vibepay"
+    "venmo": {
+        "name": "Venmo", 
+        "url": "https://venmo.com/code?user_id=3354253905100800472&created=1746493056.679508"
+    },
+    "vibepay": {
+        "name": "VibePay",
+        "url": "/vibepay"  # Local URL for the simulated payment page
+    }
+}
+
 # Initialize the thermal printer
 def init_thermal_printer():
     """Initialize the thermal printer."""
@@ -51,8 +64,17 @@ VIBE_CODER_ASCII = [
 
 # Function to get initial receipt content
 def get_initial_receipt_content():
-    """Get the standardized initial receipt content"""
-    venmo_url = "https://venmo.com/code?user_id=3354253905100800472&created=1746493056.679508"
+    """Get the standardized initial receipt content based on current payment mode"""
+    current_mode = PAYMENT_MODE["current_mode"]
+    payment_service = PAYMENT_MODE[current_mode]["name"]
+    payment_url = PAYMENT_MODE[current_mode]["url"]
+    
+    # Create a full URL for VibePay if using local path
+    if current_mode == "vibepay" and payment_url.startswith("/"):
+        import socket
+        local_ip = get_local_ip()
+        port = int(os.getenv("PORT", 5002))
+        payment_url = f"http://{local_ip}:{port}{payment_url}"
     
     return {
         "initial_setup_lines": [
@@ -68,7 +90,7 @@ def get_initial_receipt_content():
             "ITEM:",
             "CUSTOM APP DEVELOPMENT",
             "",
-            "In the Venmo description,",
+            f"In the {payment_service} description,",
             "describe the app you want:",
             "",
             "- Pay $0.25 for a quick app",
@@ -77,11 +99,12 @@ def get_initial_receipt_content():
             "Your app will be automatically",
             "generated after payment.",
             "--------------------",
-            "Thank you for participating!",
+            "Scan QR code below to pay:",
+            f"Using {payment_service}",
             "",
             "www.haukesand.github.io"
         ],
-        "venmo_qr_data": venmo_url
+        "venmo_qr_data": payment_url
     }
 
 # Initialize Venmo QR manager with email monitoring
@@ -164,29 +187,218 @@ def index():
     """Serve the main HTML page."""
     return send_from_directory(app.static_folder, "index.html")
     
+@app.route("/vibepay")
+def vibepay_payment():
+    """Serve the VibePay simulation page."""
+    # Generate a simple HTML page that simulates a Venmo-like payment form
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>VibePay - Simulated Payment</title>
+        <style>
+            body {{
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+                margin: 0;
+                padding: 20px;
+                background-color: #0074DE;
+                color: white;
+            }}
+            .container {{
+                max-width: 400px;
+                margin: 0 auto;
+                background-color: white;
+                border-radius: 12px;
+                padding: 20px;
+                color: #333;
+                box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            }}
+            h1 {{
+                text-align: center;
+                color: #0074DE;
+                margin-bottom: 25px;
+            }}
+            .logo {{
+                font-size: 24px;
+                font-weight: bold;
+                text-align: center;
+                margin-bottom: 20px;
+            }}
+            label {{
+                display: block;
+                margin: 15px 0 5px;
+                font-weight: bold;
+            }}
+            input, textarea {{
+                width: 100%;
+                padding: 10px;
+                border: 1px solid #ddd;
+                border-radius: 6px;
+                box-sizing: border-box;
+                font-size: 16px;
+            }}
+            textarea {{
+                height: 100px;
+                resize: vertical;
+            }}
+            button {{
+                background-color: #0074DE;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 12px 20px;
+                width: 100%;
+                font-size: 16px;
+                font-weight: bold;
+                margin-top: 20px;
+                cursor: pointer;
+            }}
+            button:hover {{
+                background-color: #0065C1;
+            }}
+            .success-message {{
+                display: none;
+                background-color: #E3F2FD;
+                border-left: 4px solid #0074DE;
+                padding: 15px;
+                margin: 20px 0;
+                border-radius: 4px;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="logo">VibePay</div>
+            <h1>Simulated Payment</h1>
+            
+            <form id="payment-form">
+                <label for="amount">Amount</label>
+                <input type="number" id="amount" name="amount" min="0.01" step="0.01" value="0.25" required>
+                
+                <label for="note">App Description</label>
+                <textarea id="note" name="note" placeholder="Describe the app you want to build..." required></textarea>
+                
+                <div id="success-message" class="success-message">
+                    Payment successful! Your app is being generated.
+                </div>
+                
+                <button type="submit">Pay Now</button>
+            </form>
+        </div>
+        
+        <script>
+            document.getElementById('payment-form').addEventListener('submit', function(e) {{
+                e.preventDefault();
+                const amount = document.getElementById('amount').value;
+                const note = document.getElementById('note').value;
+                
+                // Send the payment info to our simulated payment endpoint
+                fetch('/api/vibepay-payment', {{
+                    method: 'POST',
+                    headers: {{
+                        'Content-Type': 'application/json',
+                    }},
+                    body: JSON.stringify({{
+                        amount: amount,
+                        note: note
+                    }})
+                }})
+                .then(response => response.json())
+                .then(data => {{
+                    // Show success message
+                    document.getElementById('success-message').style.display = 'block';
+                    document.querySelector('button').disabled = true;
+                    
+                    // Redirect after 3 seconds
+                    setTimeout(() => {{
+                        window.location.href = '/';
+                    }}, 3000);
+                }})
+                .catch(error => {{
+                    alert('Error processing payment: ' + error.message);
+                }});
+            }});
+        </script>
+    </body>
+    </html>
+    """
+    return html_content
+    
+@app.route("/api/vibepay-payment", methods=["POST"])
+def process_vibepay_payment():
+    """Process a simulated VibePay payment."""
+    # Get the payment info from the request body
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Missing request data"}), 400
+        
+    # Extract payment details
+    try:
+        amount = float(data.get("amount", 0))
+        if amount <= 0:
+            return jsonify({"error": "Amount must be greater than 0"}), 400
+    except (ValueError, TypeError):
+        return jsonify({"error": "Invalid amount"}), 400
+        
+    note = data.get("note", "")
+    if not note or len(note.strip()) == 0:
+        return jsonify({"error": "Note is required"}), 400
+        
+    # Log the payment
+    add_log(f"VibePay payment received: ${amount:.2f} for '{note}'", "info")
+    
+    # Use the same flow as real Venmo payments to generate the app
+    try:
+        # Create a payment data structure similar to what venmo_email.py produces
+        payment_data = {
+            "amount": amount,
+            "note": note,
+            "sender": "VibePay User",
+            "timestamp": time.time()
+        }
+        
+        # Trigger app generation using the venmo_qr_manager
+        venmo_qr_manager.handle_payment(payment_data)
+        
+        return jsonify({
+            "success": True,
+            "message": "Payment processed successfully"
+        })
+    except Exception as e:
+        add_log(f"Error processing VibePay payment: {e}", "error")
+        return jsonify({
+            "success": False,
+            "error": f"Error processing payment: {str(e)}"
+        }), 500
+
 @app.route("/api/venmo-scanned")
 def venmo_scanned():
     """Handle notification that someone scanned the Venmo QR code."""
     # Log the scan
-    add_log("Someone scanned the Venmo QR code", "info")
+    current_mode = PAYMENT_MODE["current_mode"]
+    payment_service = PAYMENT_MODE[current_mode]["name"]
+    
+    add_log(f"Someone scanned the {payment_service} QR code", "info")
     thermal_printer_manager.print_text([
         "VIBE CODER",
         VIBE_CODER_ASCII[0],
         VIBE_CODER_ASCII[1],
         "--------------------",
-        "VENMO QR SCANNED!",
+        f"{payment_service.upper()} QR SCANNED!",
         "User is at the payment step.",
-        "Waiting for Venmo email...",
+        f"Waiting for {payment_service} payment...",
         "--------------------",
         time.strftime("%m/%d/%Y %H:%M:%S")
     ], align='center', cut=True)
     
-    # The actual payment logic happens in the email monitor
-    # This endpoint is just for notification that someone scanned the QR
+    # The actual payment logic happens in the email monitor for Venmo
+    # or through the simulation endpoint for VibePay
     
     return jsonify({
-        "message": "Scan recorded. Check your Venmo app to complete payment.",
-        "instructions": "In the payment note, describe the app you want to have built.",
+        "message": f"Scan recorded. Check your {payment_service} app to complete payment.",
+        "instructions": f"In the {payment_service} note, describe the app you want to have built.",
         "pricing": {
             "quick_app": "$0.25",
             "high_quality_app": "$1.00"
@@ -229,10 +441,68 @@ def get_email_status():
         "last_generated_app": last_generated_app,
         "timestamp": time.time(),
         "venmo_profile_url": VENMO_CONFIG["venmo_profile_url"],
-        "venmo_qr_code": venmo_qr_manager.get_venmo_qr_code()
+        "venmo_qr_code": venmo_qr_manager.get_venmo_qr_code(),
+        "payment_mode": PAYMENT_MODE["current_mode"]
     }
     
     return jsonify(status)
+
+@app.route("/api/toggle-payment-mode", methods=["POST"])
+def toggle_payment_mode():
+    """Toggle between Venmo and VibePay payment modes."""
+    global PAYMENT_MODE
+    
+    # Get the requested mode from the request body
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Missing request data"}), 400
+        
+    requested_mode = data.get("mode")
+    
+    # Validate the requested mode
+    if requested_mode not in ["venmo", "vibepay"]:
+        return jsonify({"error": f"Invalid payment mode: {requested_mode}"}), 400
+    
+    current_mode = PAYMENT_MODE["current_mode"]
+    
+    # If already in the requested mode, return early
+    if current_mode == requested_mode:
+        return jsonify({
+            "message": f"Already in {requested_mode} mode",
+            "payment_mode": requested_mode
+        })
+    
+    # Update the payment mode
+    PAYMENT_MODE["current_mode"] = requested_mode
+    
+    # Log the mode change
+    add_log(f"Payment mode switched from {current_mode} to {requested_mode}", "info")
+    
+    # Print a new receipt with the updated payment mode
+    if thermal_printer_manager.initialized:
+        # First cut the current receipt
+        thermal_printer_manager.print_text(
+            [
+                "PAYMENT MODE CHANGED",
+                f"Switching to {PAYMENT_MODE[requested_mode]['name']} mode",
+                time.strftime("%m/%d/%Y %H:%M:%S")
+            ],
+            align='center',
+            cut=True
+        )
+        
+        # Then print a new receipt with the updated payment mode
+        receipt_content = get_initial_receipt_content()
+        thermal_printer_manager.print_continuous_receipt(
+            initial_setup_lines=receipt_content["initial_setup_lines"],
+            venmo_qr_data=receipt_content["venmo_qr_data"],
+            cut_after=False
+        )
+    
+    return jsonify({
+        "message": f"Payment mode switched to {requested_mode}",
+        "payment_mode": requested_mode
+    })
 
 @app.route("/api/check-emails", methods=["POST"])
 def check_emails_now():

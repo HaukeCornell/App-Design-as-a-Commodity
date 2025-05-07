@@ -43,6 +43,47 @@ def init_thermal_printer():
     """Initialize the thermal printer."""
     return thermal_printer_manager.initialize()
 
+# ASCII art for VIBE CODER
+VIBE_CODER_ASCII = [
+    "\\  /o|_  _   /   _  _| _  _",
+    " \\/ ||_)(-`  \\__(_)(_|(-`| "
+]
+
+# Function to get initial receipt content
+def get_initial_receipt_content():
+    """Get the standardized initial receipt content"""
+    venmo_url = "https://venmo.com/code?user_id=3354253905100800472&created=1746493056.679508"
+    
+    return {
+        "initial_setup_lines": [
+            "App Design as a Commodity",
+            "VIBE CODER",
+            "Interactive Art Installation",
+            "--------------------",
+            VIBE_CODER_ASCII[0],
+            VIBE_CODER_ASCII[1],
+            "--------------------",
+            time.strftime("%m/%d/%Y"),
+            "",
+            "ITEM:",
+            "CUSTOM APP DEVELOPMENT",
+            "",
+            "In the Venmo description,",
+            "describe the app you want:",
+            "",
+            "- Pay $0.25 for a quick app",
+            "- Pay $1.00 for a high quality app",
+            "",
+            "Your app will be automatically",
+            "generated after payment.",
+            "--------------------",
+            "Thank you for participating!",
+            "",
+            "www.haukesand.github.io"
+        ],
+        "venmo_qr_data": venmo_url
+    }
+
 # Initialize Venmo QR manager with email monitoring
 def init_venmo_system():
     """Initialize the Venmo payment system on startup."""
@@ -129,12 +170,16 @@ def venmo_scanned():
     # Log the scan
     add_log("Someone scanned the Venmo QR code", "info")
     thermal_printer_manager.print_text([
+        "VIBE CODER",
+        VIBE_CODER_ASCII[0],
+        VIBE_CODER_ASCII[1],
+        "--------------------",
         "VENMO QR SCANNED!",
         "User is at the payment step.",
         "Waiting for Venmo email...",
         "--------------------",
-        time.strftime("%Y-%m-%d %H:%M:%S")
-    ], align='left', cut=True)
+        time.strftime("%m/%d/%Y %H:%M:%S")
+    ], align='center', cut=True)
     
     # The actual payment logic happens in the email monitor
     # This endpoint is just for notification that someone scanned the QR
@@ -470,24 +515,10 @@ def generate_app_for_payment(app_type: str, payment_amount: float, user_who_paid
         )
         
         # After cutting, start a new receipt with initial instructions
-        venmo_url = "https://venmo.com/code?user_id=3354253905100800472&created=1746493056.679508"
+        receipt_content = get_initial_receipt_content()
         thermal_printer_manager.print_continuous_receipt(
-            initial_setup_lines=[
-                "VIBE CODER",
-                "--------------------", 
-                "Scan Venmo QR code below",
-                "to generate an app!",
-                "--------------------",
-                "Tier pricing:",
-                "Simple app: $0.25",
-                "Premium app: $1.00",
-                "--------------------",
-                "Type your app description and",
-                "payment amount in Venmo.",
-                "--------------------",
-                time.strftime("%Y-%m-%d %H:%M:%S")
-            ],
-            venmo_qr_data=venmo_url,
+            initial_setup_lines=receipt_content["initial_setup_lines"],
+            venmo_qr_data=receipt_content["venmo_qr_data"],
             cut_after=False
         )
         
@@ -522,28 +553,13 @@ if __name__ == "__main__":
     init_thermal_printer()
     
     if thermal_printer_manager.initialized:
-        # Get the venmo URL for the QR code - using direct app link
-        venmo_url = "https://venmo.com/code?user_id=3354253905100800472&created=1746493056.679508"
+        # Get initial receipt content and print it without cutting
+        receipt_content = get_initial_receipt_content()
         
         # Print initial instructions using continuous receipt format
-        # This is the first section and doesn't cut the paper
         thermal_printer_manager.print_continuous_receipt(
-            initial_setup_lines=[
-                "VIBE CODER",
-                "--------------------",
-                "Scan Venmo QR code below",
-                "to generate an app!",
-                "--------------------",
-                "Tier pricing:",
-                "Simple app: $0.25",
-                "Premium app: $1.00",
-                "--------------------",
-                "Type your app description and",
-                "payment amount in Venmo.",
-                "--------------------",
-                time.strftime("%Y-%m-%d %H:%M:%S")
-            ],
-            venmo_qr_data=venmo_url,
+            initial_setup_lines=receipt_content["initial_setup_lines"],
+            venmo_qr_data=receipt_content["venmo_qr_data"],
             cut_after=False
         )
     else:

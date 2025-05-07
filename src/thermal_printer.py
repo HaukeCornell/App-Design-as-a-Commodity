@@ -297,8 +297,14 @@ class ThermalPrinter:
         """
         Print a full receipt as one continuous slip with multiple sections that are appended as processing progresses.
         
+        This method is the main interface for the VIBE CODER art installation receipt printing.
+        It creates a beautifully formatted receipt that includes:
+        1. Initial setup with art installation info and Venmo QR code
+        2. Payment received notification when payment is processed
+        3. App generation details with app QR code when the app is ready
+        
         This method can be called multiple times to add new sections to an ongoing receipt.
-        Only cut the paper when all sections have been printed.
+        Only cut the paper when all sections are printed (typically after app generation).
         
         Args:
             initial_setup_lines: List of strings for initial instructions (can be None if not at starting phase)
@@ -384,10 +390,11 @@ class ThermalPrinter:
                 # Add app QR code if provided
                 if app_url:
                     self.printer.set(align='center')
-                    self.printer.text("\n")
-                    self.printer.textln("App Description:")
+                    self.printer.text("\n--------------------\n")
+                    self.printer.textln("YOUR APP IS READY!")
+                    self.printer.textln("Scan to view your creation:")
                     self.printer.qr(app_url, size=6)
-                    self.printer.textln(f"Scan to view your app")
+                    self.printer.textln("App deployed and ready")
                 
                 # Thank you message at the end
                 self.printer.set(align='center', width=1, height=1)

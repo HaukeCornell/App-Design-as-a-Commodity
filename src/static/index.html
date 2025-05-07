@@ -334,7 +334,7 @@
             </div>
             
             <div class="receipt-body" style="margin: 15px 0;">
-                <p>In the Venmo description, describe the app you want to have:</p>
+                <p>In the <span data-payment-service>Venmo</span> description, describe the app you want to have:</p>
                 <ul style="list-style-type: none; padding-left: 10px;">
                     <li>- Pay $0.25 for a quick app</li>
                     <li>- Pay $1.00 for a high quality app</li>
@@ -345,7 +345,7 @@
             <div id="venmo-qr-container" style="text-align: center; margin: 15px 0;"></div>
             
             <div class="receipt-footer">
-                <p>Scan to pay via Venmo</p>
+                <p>Scan to pay via <span data-payment-service>Venmo</span></p>
                 <p>Thank you for participating</p>
                 <p>www.haukesand.github.io</p>
             </div>
@@ -373,7 +373,7 @@
         <div class="receipt-paper" style="margin-top: 30px;">
             <div class="receipt-header">
                 <h3>SYSTEM LOGS</h3>
-                <p>Monitoring for Venmo Payments</p>
+                <p>Payment Monitor Status</p>
             </div>
             
             <div class="log-area" id="email-log" style="height: 200px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 11px; text-align: left; border: none; background: transparent; max-width: initial; margin: 0; padding: 5px;">
@@ -381,7 +381,7 @@
             </div>
             
             <div class="receipt-footer">
-                <p>Email monitoring is automatic</p>
+                <p>Payment monitoring is automatic</p>
             </div>
         </div>
     </div>
@@ -438,8 +438,19 @@
                 // Update the UI with the new mode
                 addLog(`Payment mode switched to ${isVenmo ? "Venmo" : "VibePay"}`);
                 
-                // Force a refresh of the QR code
-                checkEmailStatus();
+                // Force a refresh of the QR code display
+                setTimeout(() => {
+                    // Get updated status with fresh QR codes
+                    fetch("/api/email-status")
+                        .then(response => response.json())
+                        .then(result => {
+                            if (response.ok) {
+                                // Update the QR code display with the new payment mode
+                                updatePaymentQRCode(result);
+                            }
+                        })
+                        .catch(error => console.error("Error refreshing QR code:", error));
+                }, 1000); // Small delay to ensure the server has time to update
                 
             } catch (error) {
                 addLog(`Error switching payment mode: ${error.message}`, 'error');
@@ -702,30 +713,92 @@
         // Check initial status on page load
         checkEmailStatus();
         
-        // Function to update the Venmo QR code display
-        function updateVenmoQRCode(qrCodeBase64, profileUrl) {
-            const venmoQRContainer = document.getElementById("venmo-qr-container");
+        // Function to update the payment QR code display
+        function updatePaymentQRCode(result) {
+            const qrContainer = document.getElementById("venmo-qr-container");
+            const currentMode = result.payment_mode || "venmo";
+            
+            // Clear the container
+            qrContainer.innerHTML = "";
+            
+            // Determine which QR code and URL to use
+            let qrCodeBase64, profileUrl, serviceName;
+            
+            if (currentMode === "venmo") {
+                qrCodeBase64 = result.venmo_qr_code;
+                profileUrl = result.venmo_profile_url;
+                serviceName = "Venmo";
+            } else {
+                qrCodeBase64 = result.vibepay_qr_code;
+                profileUrl = result.vibepay_url;
+                serviceName = "VibePay";
+            }
+            
+            // Log what we have for debugging
+            console.log(`Updating QR code for ${serviceName}:`, { 
+                qrCodeBase64: qrCodeBase64 ? `${qrCodeBase64.substring(0, 20)}...` : 'missing',
+                profileUrl: profileUrl || 'missing'
+            });
             
             // Update the QR code image
             if (qrCodeBase64) {
-                venmoQRContainer.innerHTML = "";
                 const img = document.createElement("img");
                 img.src = `data:image/png;base64,${qrCodeBase64}`;
-                img.alt = "Venmo QR Code";
+                img.alt = `${serviceName} QR Code`;
                 img.style.maxWidth = "200px";
                 img.style.border = "1px solid #ccc";
-                venmoQRContainer.appendChild(img);
+                qrContainer.appendChild(img);
                 
                 // Add a link below the QR code that also notifies our server
                 const link = document.createElement("div");
-                link.innerHTML = `<a href="${profileUrl}" target="_blank" onclick="notifyQRScanned(event)">Or click here to open Venmo</a>`;
+                link.innerHTML = `<a href="${profileUrl}" target="_blank" onclick="notifyQRScanned(event)">Or click here to open ${serviceName}</a>`;
                 link.style.marginTop = "10px";
                 link.style.fontSize = "12px";
-                venmoQRContainer.appendChild(link);
+                qrContainer.appendChild(link);
                 
                 // Make the QR code image also trigger the notification
                 img.onclick = notifyQRScanned;
+            } else {
+                // If no QR code, generate a message and regenerate
+                const errorMsg = document.createElement("div");
+                errorMsg.innerText = `QR code for ${serviceName} not found. Regenerating...`;
+                errorMsg.style.color = "#f44336";
+                errorMsg.style.padding = "10px";
+                errorMsg.style.border = "1px solid #f44336";
+                errorMsg.style.borderRadius = "4px";
+                errorMsg.style.marginBottom = "10px";
+                qrContainer.appendChild(errorMsg);
+                
+                // Create a placeholder for the missing QR
+                const placeholderQR = document.createElement("div");
+                placeholderQR.style.width = "200px";
+                placeholderQR.style.height = "200px";
+                placeholderQR.style.border = "1px dashed #ccc";
+                placeholderQR.style.display = "flex";
+                placeholderQR.style.alignItems = "center";
+                placeholderQR.style.justifyContent = "center";
+                placeholderQR.style.margin = "0 auto";
+                placeholderQR.innerText = "QR Loading...";
+                qrContainer.appendChild(placeholderQR);
+                
+                // Try to refresh after a short delay
+                setTimeout(() => {
+                    fetch("/api/email-status")
+                        .then(response => response.json())
+                        .then(result => {
+                            if (response.ok) {
+                                // Update the QR code display with the new data
+                                updatePaymentQRCode(result);
+                            }
+                        })
+                        .catch(error => console.error("Error refreshing QR code:", error));
+                }, 2000);
             }
+            
+            // Update any references to the payment service in the receipt
+            document.querySelectorAll('[data-payment-service]').forEach(element => {
+                element.textContent = serviceName;
+            });
         }
         
         // Email monitoring is now started automatically when switching to the Venmo tab
@@ -745,13 +818,12 @@
                 
                 const isActive = result.email_monitoring;
                 
-                // Update Venmo QR code display
-                if (result.venmo_qr_code && result.venmo_profile_url) {
-                    updateVenmoQRCode(result.venmo_qr_code, result.venmo_profile_url);
-                    
-                    if (isActive) {
-                        addLog("Email monitoring active. QR code ready for payments.");
-                    }
+                // Update payment QR code display
+                updatePaymentQRCode(result);
+                
+                if (isActive) {
+                    const currentMode = result.payment_mode === "venmo" ? "Venmo" : "VibePay";
+                    addLog(`Email monitoring active. ${currentMode} QR code ready for payments.`);
                 }
                 
                 // Update last payment info if available

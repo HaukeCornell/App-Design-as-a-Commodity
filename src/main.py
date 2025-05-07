@@ -15,6 +15,7 @@ import subprocess
 import shutil
 import uuid
 import threading
+import socket
 
 # Import helper modules
 import sys
@@ -32,6 +33,20 @@ from venmo_qr import venmo_qr_manager
 from venmo_config import VENMO_CONFIG, EMAIL_CONFIG
 from github_service import github_service
 from app_generator import generate_app_files
+
+# Helper function to get local IP address
+def get_local_ip():
+    """Get the local IP address of this machine for network connections."""
+    try:
+        # Get the local IP by creating a socket connection to an external server
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        # The address doesn't need to be reachable
+        s.connect(('8.8.8.8', 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "localhost"
 
 # --- App Initialization ---
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -79,22 +94,23 @@ def get_initial_receipt_content():
     return {
         "initial_setup_lines": [
             "App Design as a Commodity",
-            "VIBE CODER",
             "Interactive Art Installation",
-            "--------------------",
+            time.strftime("%m/%d/%Y"),
+            "www.haukesand.github.io"
+            "",
+            "",
+            "",
             VIBE_CODER_ASCII[0],
             VIBE_CODER_ASCII[1],
-            "--------------------",
-            time.strftime("%m/%d/%Y"),
             "",
             "ITEM:",
             "CUSTOM APP DEVELOPMENT",
             "",
-            f"In the {payment_service} description,",
-            "describe the app you want:",
-            "",
             "- Pay $0.25 for a quick app",
             "- Pay $1.00 for a high quality app",
+            "",
+            f"In the {payment_service} description,",
+            "describe the app you want.",
             "",
             "Your app will be automatically",
             "generated after payment.",
@@ -102,7 +118,7 @@ def get_initial_receipt_content():
             "Scan QR code below to pay:",
             f"Using {payment_service}",
             "",
-            "www.haukesand.github.io"
+
         ],
         "venmo_qr_data": payment_url
     }
@@ -159,6 +175,13 @@ def generate_qr_code_base64(url: str) -> str:
 application_logs = []
 log_id_counter = 0
 
+# Generation cooldown mechanism to prevent multiple apps being generated at once
+GENERATION_LOCK = {
+    "is_generating": False,
+    "last_generation_time": 0,
+    "cooldown_seconds": 15  # Time to wait between generations
+}
+
 def add_log(message, level="info"):
     """Add a log entry to the application logs."""
     global log_id_counter
@@ -180,6 +203,33 @@ def add_log(message, level="info"):
     print(f"[{level.upper()}] {message}")
     
     return log_entry
+
+def can_generate_new_app():
+    """Check if we can generate a new app based on cooldown and current generation status."""
+    current_time = time.time()
+    
+    # If we're already generating, block new generations
+    if GENERATION_LOCK["is_generating"]:
+        add_log("App generation already in progress. Please wait...", "warning")
+        return False
+        
+    # Check if we're still in the cooldown period
+    time_since_last = current_time - GENERATION_LOCK["last_generation_time"]
+    if time_since_last < GENERATION_LOCK["cooldown_seconds"]:
+        remaining = GENERATION_LOCK["cooldown_seconds"] - time_since_last
+        add_log(f"Generation cooldown in effect. Please wait {remaining:.1f} seconds.", "warning")
+        return False
+        
+    return True
+
+def start_generation():
+    """Mark the start of app generation."""
+    GENERATION_LOCK["is_generating"] = True
+    
+def end_generation():
+    """Mark the end of app generation and update the cooldown timer."""
+    GENERATION_LOCK["is_generating"] = False
+    GENERATION_LOCK["last_generation_time"] = time.time()
 
 # --- Routes --- 
 @app.route("/")
@@ -434,6 +484,17 @@ def get_email_status():
     last_payment = venmo_qr_manager.last_payment
     last_generated_app = venmo_qr_manager.last_generated_app
     
+    # Get Venmo QR code
+    venmo_qr_code = venmo_qr_manager.get_venmo_qr_code()
+    
+    # Generate VibePay QR code
+    vibepay_url = PAYMENT_MODE["vibepay"]["url"]
+    if vibepay_url.startswith("/"):
+        local_ip = get_local_ip()
+        port = int(os.getenv("PORT", 5002))
+        vibepay_url = f"http://{local_ip}:{port}{vibepay_url}"
+    vibepay_qr_code = generate_qr_code_base64(vibepay_url)
+    
     # Get current system status
     status = {
         "email_monitoring": email_processor.monitoring_active,
@@ -441,7 +502,9 @@ def get_email_status():
         "last_generated_app": last_generated_app,
         "timestamp": time.time(),
         "venmo_profile_url": VENMO_CONFIG["venmo_profile_url"],
-        "venmo_qr_code": venmo_qr_manager.get_venmo_qr_code(),
+        "venmo_qr_code": venmo_qr_code,
+        "vibepay_qr_code": vibepay_qr_code,
+        "vibepay_url": vibepay_url,
         "payment_mode": PAYMENT_MODE["current_mode"]
     }
     
@@ -480,7 +543,7 @@ def toggle_payment_mode():
     
     # Print a new receipt with the updated payment mode
     if thermal_printer_manager.initialized:
-        # First cut the current receipt
+        # First cut the current receipt to start a clean one
         thermal_printer_manager.print_text(
             [
                 "PAYMENT MODE CHANGED",
@@ -491,11 +554,24 @@ def toggle_payment_mode():
             cut=True
         )
         
-        # Then print a new receipt with the updated payment mode
+        # Generate a new receipt content with the updated payment mode
         receipt_content = get_initial_receipt_content()
+        
+        # Ensure the QR code URL is properly updated
+        payment_url = PAYMENT_MODE[requested_mode]["url"]
+        if requested_mode == "vibepay" and payment_url.startswith("/"):
+            # Create a full URL for VibePay
+            local_ip = get_local_ip()
+            port = int(os.getenv("PORT", 5002))
+            payment_url = f"http://{local_ip}:{port}{payment_url}"
+        
+        # Force clear any previous print job to ensure complete reprint
+        time.sleep(0.5)  # Small delay to ensure previous print is complete
+        
+        # Print a fresh receipt with the new payment mode and QR code
         thermal_printer_manager.print_continuous_receipt(
             initial_setup_lines=receipt_content["initial_setup_lines"],
-            venmo_qr_data=receipt_content["venmo_qr_data"],
+            venmo_qr_data=payment_url,  # Use the direct URL to ensure QR code is updated
             cut_after=False
         )
     
@@ -584,19 +660,6 @@ def generate_app_route():
         hosted_url_relative = url_for("serve_generated_app", app_id=generated_app_details["app_id"], _external=False)
         
         # Use IP address for URLs
-        import socket
-        def get_local_ip():
-            try:
-                # Get the local IP by creating a socket connection to an external server
-                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                # The address doesn't need to be reachable
-                s.connect(('8.8.8.8', 80))
-                ip = s.getsockname()[0]
-                s.close()
-                return ip
-            except Exception:
-                return "localhost"
-                
         local_ip = get_local_ip()
         
         # Use environment variable for external URL, falling back to IP address
@@ -751,18 +814,7 @@ def generate_app_for_payment(app_type: str, payment_amount: float, user_who_paid
             app_details.append(github_url)
 
         # Generate base URL for hosted app using IP address
-        import socket
-        def get_local_ip_for_receipt(): # Renamed to avoid conflict if imported elsewhere
-            try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                s.connect(('8.8.8.8', 80))
-                ip = s.getsockname()[0]
-                s.close()
-                return ip
-            except Exception:
-                return "localhost"
-                
-        local_ip = get_local_ip_for_receipt()
+        local_ip = get_local_ip()
         base_url = os.getenv("EXTERNAL_HOST", f"http://{local_ip}:5002")
         if not base_url.startswith(('http://', 'https://')):
             base_url = f"http://{base_url}"

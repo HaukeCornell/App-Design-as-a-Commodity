@@ -73,7 +73,7 @@ class VenmoQRManager:
                 
                 # Direct Venmo URL - this is the URL from your shared QR code
                 venmo_url = VENMO_CONFIG.get("venmo_direct_url", 
-                    "https://www.paypal.com/qrcodes/venmocs/4445b00a-757b-4832-836e-d53d3c37c0c5?created=1746487649.347355&printed=1")
+                "https://www.paypal.com/qrcodes/venmocs/4445b00a-757b-4832-836e-d53d3c37c0c5?created=1746487649.347355&printed=1")
                 
                 # Create QR code
                 qr = qrcode.QRCode(
@@ -232,7 +232,14 @@ class VenmoQRManager:
                 # Here we'll automatically generate an app for direct payments
                 try:
                     # Import here to avoid circular imports
-                    from src.main import generate_app_for_payment
+                    import sys
+                    current_dir = os.path.dirname(os.path.abspath(__file__))
+                    parent_dir = os.path.dirname(current_dir)
+                    if parent_dir not in sys.path:
+                        sys.path.insert(0, parent_dir)
+                    
+                    # Use a direct import instead of src.main
+                    from main import generate_app_for_payment
                     
                     # Trigger app generation in a separate thread to avoid blocking
                     import threading

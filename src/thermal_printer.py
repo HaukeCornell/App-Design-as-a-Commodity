@@ -73,7 +73,7 @@ class ThermalPrinter:
             PrinterError: If printer initialization fails
         """
         # Try different printer profiles in case one works better than others
-        printer_profiles_to_try = PRINTER_CONFIG.get("profiles", ["TM-T20II", "TM-T20II-42col", "default"])
+        printer_profiles_to_try = PRINTER_CONFIG.get("profiles", ["default"])
 
         for profile_name in printer_profiles_to_try:
             try:

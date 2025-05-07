@@ -293,7 +293,7 @@ class ThermalPrinter:
             printer_logger.error(f"Unexpected error during receipt printing: {e}")
             return False
             
-    def print_continuous_receipt(self, initial_setup_lines=None, payment_received_lines=None, app_generated_lines=None, venmo_qr_data=None, cut_after=False):
+    def print_continuous_receipt(self, initial_setup_lines=None, payment_received_lines=None, app_generated_lines=None, venmo_qr_data=None, app_url=None, cut_after=False):
         """
         Print a full receipt as one continuous slip with multiple sections that are appended as processing progresses.
         
@@ -305,6 +305,7 @@ class ThermalPrinter:
             payment_received_lines: List of strings for payment confirmation (can be None if not at payment phase)
             app_generated_lines: List of strings for app generation details (can be None if not at app generation phase)
             venmo_qr_data: Data for the Venmo QR code to print (can be None if not needed)
+            app_url: URL for the generated app QR code (can be None if not at app generation phase)
             cut_after: Whether to cut the paper after printing (set to True only after all sections are printed)
             
         Returns:
@@ -321,6 +322,8 @@ class ThermalPrinter:
                 combined_lines.extend(["--- PAYMENT RECEIVED ---"] + payment_received_lines)
             if app_generated_lines:
                 combined_lines.extend(["--- APP GENERATED ---"] + app_generated_lines)
+                if app_url:
+                    combined_lines.extend(["--- APP QR CODE ---", f"App URL: {app_url}"])
                 
             print("[NO PRINTER] " + "\n[NO PRINTER] ".join(combined_lines))
             printer_logger.warning("Thermal printer not available, skipping continuous receipt print. Logged to console.")
@@ -341,8 +344,15 @@ class ThermalPrinter:
                     self.printer.set(align='center')
                     self.printer.textln("SCAN TO PAY WITH VENMO:")
                     self.printer.qr(venmo_qr_data, size=6)
-                    self.printer.textln("Include app description and amount in your payment")
+                    
+                    # Add space and avoid line break issues with shorter lines
+                    self.printer.textln("Include app description")
+                    self.printer.textln("and payment amount")
+                    
+                    # Add monitoring message and extra space
                     self.printer.text("\n")
+                    self.printer.textln("Monitoring for payment...")
+                    self.printer.text("\n\n")
                 
             # Print payment received section if provided (during payment phase)
             if payment_received_lines:
@@ -370,7 +380,15 @@ class ThermalPrinter:
                 self.printer.set(align='left', width=1, height=1)
                 for line in app_generated_lines:
                     self.printer.textln(line)
-                    
+                
+                # Add app QR code if provided
+                if app_url:
+                    self.printer.set(align='center')
+                    self.printer.text("\n")
+                    self.printer.textln("App Description:")
+                    self.printer.qr(app_url, size=6)
+                    self.printer.textln(f"Scan to view your app")
+                
                 # Thank you message at the end
                 self.printer.set(align='center', width=1, height=1)
                 self.printer.text("\n--------------------\n")

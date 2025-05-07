@@ -465,36 +465,30 @@ def generate_app_for_payment(app_type: str, payment_amount: float, user_who_paid
         # Complete the receipt with the app generation details and cut the paper
         thermal_printer_manager.print_continuous_receipt(
             app_generated_lines=app_details,
+            app_url=hosted_url_full,  # Include the app URL for QR code
             cut_after=True
         )
         
         # After cutting, start a new receipt with initial instructions
-        venmo_url = VENMO_CONFIG["venmo_profile_url"]
+        venmo_url = "https://venmo.com/code?user_id=3354253905100800472&created=1746493056.679508"
         thermal_printer_manager.print_continuous_receipt(
             initial_setup_lines=[
                 "VIBE CODER",
-                "Thermal Receipt System Online",
                 "--------------------", 
                 "Scan Venmo QR code below",
                 "to generate an app!",
-                "Payment URL (for reference):",
-                venmo_url,
                 "--------------------",
-                "Type the app you want and",
-                "the amount of money in Venmo.",
+                "Tier pricing:",
+                "Simple app: $0.25",
+                "Premium app: $1.00",
+                "--------------------",
+                "Type your app description and",
+                "payment amount in Venmo.",
                 "--------------------",
                 time.strftime("%Y-%m-%d %H:%M:%S")
             ],
             venmo_qr_data=venmo_url,
             cut_after=False
-        )
-        
-        # Print the QR code separately (not part of the continuous receipt)
-        thermal_printer_manager.print_qr(
-            hosted_url_full, 
-            text_above="Scan to view your app:",
-            text_below=f"{actual_app_type} ({app_id})", 
-            cut=False
         )
         
         # Store the generated app info for access by the UI
@@ -528,23 +522,24 @@ if __name__ == "__main__":
     init_thermal_printer()
     
     if thermal_printer_manager.initialized:
-        # Get the venmo URL for the QR code
-        venmo_url = VENMO_CONFIG["venmo_profile_url"]
+        # Get the venmo URL for the QR code - using direct app link
+        venmo_url = "https://venmo.com/code?user_id=3354253905100800472&created=1746493056.679508"
         
         # Print initial instructions using continuous receipt format
         # This is the first section and doesn't cut the paper
         thermal_printer_manager.print_continuous_receipt(
             initial_setup_lines=[
                 "VIBE CODER",
-                "Thermal Receipt System Online",
                 "--------------------",
                 "Scan Venmo QR code below",
                 "to generate an app!",
-                "Payment URL (for reference):",
-                venmo_url,
                 "--------------------",
-                "Type the app you want and",
-                "the amount of money in Venmo.",
+                "Tier pricing:",
+                "Simple app: $0.25",
+                "Premium app: $1.00",
+                "--------------------",
+                "Type your app description and",
+                "payment amount in Venmo.",
                 "--------------------",
                 time.strftime("%Y-%m-%d %H:%M:%S")
             ],

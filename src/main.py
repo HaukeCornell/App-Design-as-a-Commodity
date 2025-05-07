@@ -31,6 +31,7 @@ from thermal_printer import thermal_printer_manager
 from venmo_email import email_processor, init_email_monitoring
 from venmo_qr import venmo_qr_manager
 from venmo_config import VENMO_CONFIG, EMAIL_CONFIG
+from config import PRINTER_CONFIG  # Import printer config
 from github_service import github_service
 from app_generator import generate_app_files
 
@@ -96,7 +97,7 @@ def get_initial_receipt_content():
             "App Design as a Commodity",
             "Interactive Art Installation",
             time.strftime("%m/%d/%Y"),
-            "www.haukesand.github.io"
+            "www.haukesand.github.io",
             "",
             "",
             "",
@@ -339,10 +340,28 @@ def vibepay_payment():
         </div>
         
         <script>
+            // Variable to track if a submission is in progress
+            let isSubmitting = false;
+            
             document.getElementById('payment-form').addEventListener('submit', function(e) {{
                 e.preventDefault();
+                
+                // Prevent multiple submissions
+                if (isSubmitting) {{
+                    console.log("Payment already being processed, ignoring duplicate submission");
+                    return;
+                }}
+                
+                isSubmitting = true;
+                
                 const amount = document.getElementById('amount').value;
                 const note = document.getElementById('note').value;
+                
+                // Disable all form elements to prevent interaction
+                const form = document.getElementById('payment-form');
+                Array.from(form.elements).forEach(element => {{
+                    element.disabled = true;
+                }});
                 
                 // Disable the button immediately to prevent multiple submits
                 const submitButton = document.querySelector('button[type="submit"]');
@@ -357,7 +376,8 @@ def vibepay_payment():
                     }},
                     body: JSON.stringify({{
                         amount: amount,
-                        note: note
+                        note: note,
+                        timestamp: new Date().getTime() // Add a timestamp to ensure uniqueness
                     }})
                 }})
                 .then(response => response.json().then(data => {{ return {{response, data}}; }}))
@@ -417,10 +437,14 @@ def vibepay_payment():
                         successMsg.style.borderLeft = '4px solid #F44336';
                         successMsg.innerHTML = '<strong>Error:</strong> ' + (data.error || 'Failed to process payment');
                         
-                        // Enable button again after 5 seconds
+                        // Enable form elements after 5 seconds
                         setTimeout(() => {{
+                            Array.from(form.elements).forEach(element => {{
+                                element.disabled = false;
+                            }});
                             submitButton.disabled = false;
                             submitButton.textContent = 'Pay Now';
+                            isSubmitting = false; // Reset submission state
                         }}, 5000);
                     }}
                 }})
@@ -431,9 +455,13 @@ def vibepay_payment():
                     successMsg.style.borderLeft = '4px solid #F44336';
                     successMsg.innerHTML = '<strong>Error:</strong> ' + (error.message || 'An unexpected error occurred');
                     
-                    // Enable button again
+                    // Enable form elements
+                    Array.from(form.elements).forEach(element => {{
+                        element.disabled = false;
+                    }});
                     submitButton.disabled = false;
                     submitButton.textContent = 'Pay Now';
+                    isSubmitting = false; // Reset submission state
                 }});
             }});
         </script>
@@ -473,6 +501,26 @@ def process_vibepay_payment():
     # Log the payment
     add_log(f"VibePay payment received: ${amount:.2f} for '{note}'", "info")
     
+    # Directly print payment receipt if thermal printer is connected
+    if thermal_printer_manager.initialized:
+        payment_details = [
+            f"PAYMENT RECEIVED",
+            f"FROM: VibePay User",
+            f"AMOUNT: ${amount:.2f}",
+            f"REQUEST: {note}",
+            "",
+            "Generating your app now...",
+            time.strftime("%Y-%m-%d %H:%M:%S")
+        ]
+        
+        # Print receipt with payment details
+        thermal_printer_manager.print_receipt(
+            header_lines=["VIBEPAY PAYMENT", "-------------"],
+            body_lines=payment_details,
+            footer_lines=["Please wait for your app..."],
+            cut=True
+        )
+    
     # Acquire the generation lock
     start_generation()
     
@@ -483,30 +531,32 @@ def process_vibepay_payment():
             "amount": amount,
             "note": note,
             "sender": "VibePay User",
-            "timestamp": time.time()
+            "timestamp": time.time(),
+            # Add a flag to indicate this was a VibePay request to avoid double generation
+            "vibepay_direct": True  
         }
         
-        # Print receipt for VibePay if thermal printer is connected
-        if thermal_printer_manager.initialized:
-            payment_details = [
-                f"User: VibePay User",
-                f"Amount: ${amount:.2f}",
-                f"Request: {note}",
-                "Generating your app...",
-                time.strftime("%Y-%m-%d %H:%M:%S")
-            ]
-            
-            # Add payment section to the receipt without cutting
-            thermal_printer_manager.print_continuous_receipt(
-                payment_received_lines=payment_details,
-                cut_after=False
-            )
+        # Generate the app directly 
+        # We need to explicitly log that this is VibePay to ensure correct behavior
+        add_log(f"Starting app generation for VibePay payment", "info")
         
-        # Trigger app generation using the venmo_qr_manager
-        venmo_qr_manager.handle_payment(payment_data)
+        generate_app_for_payment(
+            note,
+            amount,
+            "VibePay User"  # This specific user identifier helps track the payment source
+        )
         
         # App was generated, update cooldown
-        end_generation()
+        # Note: generate_app_for_payment will have already called end_generation
+        
+        # Update the last payment for the UI but mark it as processed
+        venmo_qr_manager.last_payment = {
+            "amount": amount,
+            "note": note,
+            "sender": "VibePay User",
+            "timestamp": time.time(),
+            "processed": True  # Mark as already processed to prevent duplicate generation from UI
+        }
         
         return jsonify({
             "success": True,
@@ -582,6 +632,9 @@ def get_email_status():
     last_payment = venmo_qr_manager.last_payment
     last_generated_app = venmo_qr_manager.last_generated_app
     
+    # Log the current payment mode for debugging
+    add_log(f"Current payment mode (from /api/email-status): {PAYMENT_MODE['current_mode']}", "info")
+    
     # Get Venmo QR code
     venmo_qr_code = venmo_qr_manager.get_venmo_qr_code()
     
@@ -603,7 +656,13 @@ def get_email_status():
         "venmo_qr_code": venmo_qr_code,
         "vibepay_qr_code": vibepay_qr_code,
         "vibepay_url": vibepay_url,
-        "payment_mode": PAYMENT_MODE["current_mode"]
+        "payment_mode": PAYMENT_MODE["current_mode"],
+        "debug_info": {
+            "current_mode": PAYMENT_MODE["current_mode"],
+            "server_time": time.time(),
+            "venmo_url": PAYMENT_MODE["venmo"]["url"],
+            "vibepay_url": PAYMENT_MODE["vibepay"]["url"]
+        }
     }
     
     return jsonify(status)
@@ -629,7 +688,7 @@ def toggle_payment_mode():
     # If already in the requested mode, return early
     if current_mode == requested_mode:
         return jsonify({
-            "message": f"Already in {requested_mode} mode",
+            "message": f"Already in {requested_mode} mode", 
             "payment_mode": requested_mode
         })
     
@@ -639,75 +698,74 @@ def toggle_payment_mode():
     # Log the mode change
     add_log(f"Payment mode switched from {current_mode} to {requested_mode}", "info")
     
-    # Prepare payment service name for logs/receipts
-    payment_service = PAYMENT_MODE[requested_mode]["name"]
-    
-    # Print a new receipt with the updated payment mode
-    if thermal_printer_manager.initialized:
-        # First cut the current receipt to start a clean one
-        thermal_printer_manager.print_text(
-            [
-                "PAYMENT MODE CHANGED",
-                f"Switching to {payment_service} mode",
-                "--------------------",
-                "A new receipt is being printed",
-                "with updated QR code.",
-                "--------------------",
-                time.strftime("%m/%d/%Y %H:%M:%S")
-            ],
-            align='center',
-            cut=True
-        )
+    # Try printing via the lp command (OS level) - a completely different approach
+    try:
+        # Create a temporary file with our message
+        import tempfile
         
-        # Generate a new receipt content with the updated payment mode
-        receipt_content = get_initial_receipt_content()
+        # Create a temporary text file for printing
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as temp_file:
+            message = f"""
+MODE CHANGED
+====================
+
+Now in {requested_mode.upper()} mode
+
+Time: {time.strftime('%H:%M:%S')}
+====================
+"""
+            temp_file.write(message)
+            temp_path = temp_file.name
+            
+        # Print via system command
+        import subprocess
+        add_log(f"Printing via system command to file: {temp_path}", "info")
+        result = subprocess.run(['lp', temp_path], capture_output=True, text=True)
         
-        # Ensure the QR code URL is properly updated
-        payment_url = PAYMENT_MODE[requested_mode]["url"]
-        if requested_mode == "vibepay" and payment_url.startswith("/"):
-            # Create a full URL for VibePay
-            local_ip = get_local_ip()
-            port = int(os.getenv("PORT", 5002))
-            payment_url = f"http://{local_ip}:{port}{payment_url}"
+        if result.returncode == 0:
+            add_log(f"System print command successful: {result.stdout}", "info")
+        else:
+            add_log(f"System print command failed: {result.stderr}", "error")
+            
+            # If system command fails, try the direct USB approach again
+            add_log("Trying direct USB approach as backup", "info")
+            from escpos.printer import Usb
+            printer = Usb(0x04b8, 0x0e03, 0)
+            printer.text(message)
+            printer.cut()
         
-        # Force clear any previous print job to ensure complete reprint
-        time.sleep(0.5)  # Small delay to ensure previous print is complete
-        
-        # Add mode-specific instructions for clarity
-        if requested_mode == "venmo":
-            header_text = [
-                "VENMO PAYMENT MODE",
-                "Monitor emails for real payments",
-            ]
-        else:  # vibepay
-            header_text = [
-                "VIBEPAY PAYMENT MODE",
-                "Simulated payments for testing",
-            ]
-        
-        # Print mode-specific header first
-        thermal_printer_manager.print_text(
-            header_text,
-            align='center',
-            cut=False
-        )
-        
-        # Short delay before printing the main receipt content
-        time.sleep(0.2)
-        
-        # Print a fresh receipt with the new payment mode and QR code
-        thermal_printer_manager.print_continuous_receipt(
-            initial_setup_lines=receipt_content["initial_setup_lines"],
-            venmo_qr_data=payment_url,  # Use the direct URL to ensure QR code is updated
-            cut_after=False
-        )
-        
-        add_log(f"Printed new receipt with {payment_service} QR code", "info")
+    except Exception as e:
+        add_log(f"All printing methods failed: {e}", "error")
     
     return jsonify({
         "message": f"Payment mode switched to {requested_mode}",
         "payment_mode": requested_mode
     })
+
+@app.route("/api/debug-print", methods=["GET", "POST"])
+def debug_print():
+    """Ultra simple debug endpoint to test thermal printer directly."""
+    add_log("Debug button pressed - trying DIRECT PRINT", "info")
+    
+    # ULTRA-BASIC DIRECT PRINTING TEST - use the minimum code necessary
+    try:
+        # Import printer directly
+        from escpos.printer import Usb
+        
+        # Get printer directly
+        printer = Usb(0x04b8, 0x0e03, 0)
+        
+        # Print directly
+        printer.text("\n\nTEST PRINT\n\n")
+        printer.text("Debug button pressed\n")
+        printer.text(f"Time: {time.strftime('%H:%M:%S')}\n\n")
+        printer.cut()
+        
+        add_log("Debug button print successful", "info")
+        return jsonify({"success": True, "message": "Print test successful"})
+    except Exception as e:
+        add_log(f"Debug print failed: {e}", "error")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route("/api/check-emails", methods=["POST"])
 def check_emails_now():
@@ -913,20 +971,26 @@ def generate_app_for_payment(app_type: str, payment_amount: float, user_who_paid
         log_msg = f"Starting app generation for payment: '{app_type}' (${payment_amount:.2f}) from '{user_who_paid}'"
         add_log(log_msg, "info")
         
-        # Print payment received section on the continuous receipt (no cut)
-        payment_details = [
-            f"User: {user_who_paid}",
-            f"Amount: ${payment_amount:.2f}",
-            f"Request: {app_type}",
-            "Generating your app...",
-            time.strftime("%Y-%m-%d %H:%M:%S")
-        ]
+        # For Venmo payments, print a receipt - VibePay has its own receipt handling
+        # Only print here if this is a Venmo email payment, not a VibePay direct payment
+        payment_source = "Venmo" if user_who_paid != "VibePay User" else "VibePay"
+        add_log(f"Generating app for {payment_source} payment", "info")
         
-        # Add payment section to the receipt without cutting
-        if thermal_printer_manager.initialized:
-            thermal_printer_manager.print_continuous_receipt(
-                payment_received_lines=payment_details,
-                cut_after=False
+        if payment_source == "Venmo" and thermal_printer_manager.initialized:
+            # Print payment receipt only for Venmo (VibePay already printed one)
+            payment_details = [
+                f"User: {user_who_paid}",
+                f"Amount: ${payment_amount:.2f}",
+                f"Request: {app_type}",
+                "Generating your app...",
+                time.strftime("%Y-%m-%d %H:%M:%S")
+            ]
+            
+            thermal_printer_manager.print_receipt(
+                header_lines=["PAYMENT RECEIVED", "-------------"],
+                body_lines=payment_details,
+                footer_lines=["Please wait for your app..."],
+                cut=False
             )
 
         try:
@@ -993,20 +1057,81 @@ def generate_app_for_payment(app_type: str, payment_amount: float, user_who_paid
             app_details.append("Access your app at:")
             app_details.append(hosted_url_full)
             
-            # Complete the receipt with the app generation details and cut the paper
+            # Print the generated app details for ALL payment types
+            # Ensure this works for both Venmo and VibePay payments
             if thermal_printer_manager.initialized:
-                thermal_printer_manager.print_continuous_receipt(
-                    app_generated_lines=app_details,
-                    app_url=hosted_url_full,  # Include the app URL for QR code
-                    cut_after=True
+                # We need to print app generation receipt for both Venmo AND VibePay
+                payment_source = "Venmo" if user_who_paid != "VibePay User" else "VibePay"
+                add_log(f"Printing app receipt for {payment_source} payment", "info")
+                
+                # App generation header based on payment source
+                app_header = [
+                    f"APP GENERATED!",
+                    f"VIA {payment_source.upper()}",
+                    "-----------------",
+                ]
+                
+                # Print the app details with clear header
+                thermal_printer_manager.print_receipt(
+                    header_lines=app_header,
+                    body_lines=app_details,
+                    footer_lines=[
+                        "Made with ♥ by Vibe Coder",
+                        time.strftime("%Y-%m-%d %H:%M:%S")
+                    ],
+                    cut=False
                 )
                 
-                # After cutting, start a new receipt with initial instructions
-                receipt_content = get_initial_receipt_content()
-                thermal_printer_manager.print_continuous_receipt(
-                    initial_setup_lines=receipt_content["initial_setup_lines"],
-                    venmo_qr_data=receipt_content["venmo_qr_data"],
-                    cut_after=False
+                # Print QR code to access the app
+                thermal_printer_manager.print_qr(
+                    hosted_url_full,
+                    text_above="SCAN TO ACCESS YOUR APP",
+                    text_below="App ready to use",
+                    cut=True
+                )
+                
+                # After cutting, print a fresh receipt for the next customer
+                current_mode = PAYMENT_MODE["current_mode"]
+                payment_service = PAYMENT_MODE[current_mode]["name"]
+                
+                # Get the QR code URL
+                payment_url = PAYMENT_MODE[current_mode]["url"]
+                if current_mode == "vibepay" and payment_url.startswith("/"):
+                    local_ip = get_local_ip()
+                    port = int(os.getenv("PORT", 5002))
+                    payment_url = f"http://{local_ip}:{port}{payment_url}"
+                
+                # Print a new receipt for the next customer
+                thermal_printer_manager.print_receipt(
+                    header_lines=[
+                        "VIBE CODER",
+                        "App Design as a Commodity",
+                        f"{payment_service.upper()} PAYMENT MODE",
+                        "-----------------------"
+                    ],
+                    body_lines=[
+                        f"Instructions for {payment_service}:",
+                        "- Pay $0.25 for a quick app",
+                        "- Pay $1.00 for a high quality app",
+                        "",
+                        f"In the {payment_service} note,",
+                        "describe the app you want.",
+                        "",
+                        "Scan QR code below to pay:",
+                    ],
+                    footer_lines=[
+                        time.strftime("%m/%d/%Y %H:%M:%S"),
+                        "www.haukesand.github.io"
+                    ],
+                    cut=False
+                )
+                
+                # Print QR code for payment
+                thermal_printer_manager.print_qr(
+                    payment_url,
+                    text_above=f"PAY WITH {payment_service.upper()}",
+                    text_below="Include app description in payment note",
+                    cut=False
                 )
             
             # Store the generated app info for access by the UI

@@ -48,7 +48,7 @@ def generate_code_with_gemini(app_type: str, tier: str, readme_content: str) -> 
         f"--- README START ---\n{readme_content}\n--- README END ---\n\n"
         f"The application should be for: \"{app_type}\".\n"
         f"Requirements:\n"
-        f"- The entire application (HTML structure, CSS styles, and JavaScript logic) MUST be contained within a single HTML file.\n"
+        f"- The entire application (HTML structure, CSS styles, and JavaScript logic) MUST be contained within a single HTML file, no usage of external API end-points that might not work.\n"
         f"- CSS should be included in a `<style>` tag within the `<head>`.\n"
         f"- JavaScript should be included in a `<script>` tag, preferably at the end of the `<body>`.\n"
         f"- The application must be functional, ready to use, and accurately reflect the description and features outlined in the provided README.\n"

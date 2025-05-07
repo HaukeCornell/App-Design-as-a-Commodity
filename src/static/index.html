@@ -321,6 +321,8 @@
             </div>
         </div>
         
+        
+        
         <div class="receipt-paper" id="instructions-receipt">
             <div class="receipt-header">
                 <h3>VIBE CODER</h3>
@@ -420,6 +422,8 @@
                 // Update the label immediately for responsive UI
                 paymentModeLabel.textContent = isVenmo ? "Venmo" : "VibePay";
                 
+                console.log(`Toggle changed: isVenmo=${isVenmo}, newMode=${newMode}`);
+                
                 // Send the request to update the mode
                 const response = await fetch("/api/toggle-payment-mode", {
                     method: "POST",
@@ -438,19 +442,43 @@
                 // Update the UI with the new mode
                 addLog(`Payment mode switched to ${isVenmo ? "Venmo" : "VibePay"}`);
                 
-                // Force a refresh of the QR code display
+                // IMPORTANT: Disable ALL UI refreshes temporarily to allow printer to work
+                window.suppressAutoUpdates = true;
+                
+                // Log the printer operation
+                addLog(`PRINTER ACTIVE: Paused all UI updates during printing for ${newMode} mode...`, "warning");
+                
+                // Add a much longer delay before refreshing the UI to allow the printer to complete
+                addLog("Pausing for 10 seconds to let printer finish...");
+                
+                // IMPORTANT: Use a much longer delay to give the printer time to finish
                 setTimeout(() => {
-                    // Get updated status with fresh QR codes
+                    addLog(`Receipt should now be printed for ${newMode} mode`);
+                    
+                    // Now it's safe to refresh the QR code display
                     fetch("/api/email-status")
                         .then(response => response.json())
                         .then(result => {
                             if (response.ok) {
                                 // Update the QR code display with the new payment mode
                                 updatePaymentQRCode(result);
+                                
+                                // Log the debug info
+                                console.log("Payment mode from server:", result.payment_mode);
+                                console.log("Debug info:", result.debug_info);
+                                
+                                // Re-enable UI updates
+                                window.suppressAutoUpdates = false;
+                                addLog("UI updates resumed", "info");
                             }
                         })
-                        .catch(error => console.error("Error refreshing QR code:", error));
-                }, 1000); // Small delay to ensure the server has time to update
+                        .catch(error => {
+                            console.error("Error refreshing QR code:", error);
+                            // Re-enable UI updates even if there was an error
+                            window.suppressAutoUpdates = false;
+                            addLog("UI updates resumed (after error)", "warning");
+                        });
+                }, 10000); // Much longer delay (10 seconds) to ensure printer has time to complete
                 
             } catch (error) {
                 addLog(`Error switching payment mode: ${error.message}`, 'error');
@@ -462,18 +490,49 @@
             }
         });
         
-        // Simple auto-check for updates every second
+        // Add a refresh button to the payment mode container
+        const paymentModeContainer = document.querySelector('.payment-mode-container');
+        const refreshButton = document.createElement('button');
+        refreshButton.textContent = 'Check for Updates';
+        refreshButton.style.marginLeft = '15px';
+        refreshButton.style.padding = '5px 10px';
+        refreshButton.style.backgroundColor = '#4CAF50';
+        refreshButton.style.color = 'white';
+        refreshButton.style.border = 'none';
+        refreshButton.style.borderRadius = '4px';
+        refreshButton.style.cursor = 'pointer';
+        
+        // Add the button to the container
+        paymentModeContainer.appendChild(refreshButton);
+        
+        // Add event listener for manual refresh
+        refreshButton.addEventListener('click', function() {
+            if (!window.suppressAutoUpdates) {
+                addLog("Manually checking for updates...");
+                checkEmailStatus();
+                checkForNewEmails();
+            } else {
+                addLog("Cannot check for updates while printer is active", "warning");
+            }
+        });
+        
+        // A more balanced approach for auto-updates
+        window.suppressAutoUpdates = false; // Global flag to completely disable updates
+        
+        // Start with a much lighter polling interval
         setInterval(function() {
-            // If we're on the Venmo tab, check for app updates
+            // Skip all updates when printer is active
+            if (window.suppressAutoUpdates) {
+                return;
+            }
+            
+            // If we're on the Venmo tab, ensure email monitoring is active
             const venmoTab = document.querySelector('.tab[data-tab="venmo"]');
             if (venmoTab && venmoTab.classList.contains('active')) {
-                // Keep email monitoring active
+                // Keep email monitoring active, but don't check status
                 startEmailMonitoring();
-                
-                // Check for status updates (this will refresh the UI if there's a new app)
-                checkEmailStatus();
             }
-        }, 1000); // Check every second for a smooth, real-time feeling
+        }, 10000); // Every 10 seconds just ensure email monitoring is active
         
         // Tab switching functionality
         const tabs = document.querySelectorAll('.tab');
@@ -640,10 +699,8 @@
                 }
                 
                 // Create a receipt for the manual generation too
-                // Switch to Venmo tab
+                // But don't auto-switch tabs to avoid UI confusion
                 setTimeout(() => {
-                    tabs[1].click();
-                    
                     // Create the receipt element if it doesn't exist
                     const generatedReceiptExists = document.getElementById('generated-app-receipt');
                     if (!generatedReceiptExists) {
@@ -706,6 +763,9 @@
                         // Append the receipt at the bottom after the log area
                         const venmoTab = document.getElementById('venmo-tab');
                         venmoTab.appendChild(generatedReceipt);
+                        
+                        // Inform the user they can view the receipt in the Payment Monitor tab
+                        statusDiv.textContent += " - Receipt available in Payment Monitor tab.";
                         
                         // Add the QR code to the receipt
                         if (result.qr_code_image) {
@@ -1046,8 +1106,8 @@
                             }
                         }
                         
-                        // Also update the original manual results display for consistency
-                        tabs[0].click();
+                        // Update the manual tab data without switching to it
+                        // This prevents tab flickering while still keeping both views in sync
                         
                         // Update the status with the generation message
                         statusDiv.textContent = `${app.message} GitHub: ${app.github_url}`;
@@ -1073,11 +1133,6 @@
                         }
                         
                         addLog(`App generated: ${app.app_type}`);
-                        
-                        // Switch back to the Venmo tab to show the receipt
-                        setTimeout(() => {
-                            tabs[1].click();
-                        }, 2000);
                     }
                 }
                 
@@ -1087,13 +1142,23 @@
             }
         }
         
-        // Start periodic status updates
+        // Start periodic status updates with better balance between responsiveness and printer safety
         function startStatusUpdates() {
-            // Check status every 10 seconds
-            setInterval(checkEmailStatus, 10000);
+            // Check status more frequently but still be careful about printer interruptions
+            setInterval(function() {
+                // Only check if updates aren't suppressed (prevents printer interruptions)
+                if (!window.suppressAutoUpdates) {
+                    checkEmailStatus();
+                }
+            }, 15000); // Every 15 seconds as requested
             
-            // Also periodically check for new emails (every 30 seconds)
-            setInterval(checkForNewEmails, 30000);
+            // Also periodically check for new emails
+            setInterval(function() {
+                // Only check if updates aren't suppressed (prevents printer interruptions)
+                if (!window.suppressAutoUpdates) {
+                    checkForNewEmails();
+                }
+            }, 20000); // Every 20 seconds
         }
         
         // Function to check for new emails
@@ -1155,6 +1220,8 @@
         }
         
         // Add log message to the log area
+        
+        
         // Initialize the page and add default log message
         window.addEventListener('DOMContentLoaded', function() {
             // Initialize payment mode

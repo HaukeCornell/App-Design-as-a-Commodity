@@ -348,7 +348,15 @@ class ThermalPrinter:
                 # If Venmo QR data is provided, print it as part of the initial setup
                 if venmo_qr_data:
                     self.printer.set(align='center')
-                    self.printer.textln("SCAN TO PAY WITH VENMO:")
+                    # Get payment mode name from URL (either Venmo or VibePay)
+                    if "venmo.com" in venmo_qr_data.lower():
+                        payment_name = "VENMO"
+                    elif "vibepay" in venmo_qr_data.lower():
+                        payment_name = "VIBEPAY"
+                    else:
+                        payment_name = "PAYMENT SERVICE"
+                        
+                    self.printer.textln(f"SCAN TO PAY WITH {payment_name}:")
                     self.printer.qr(venmo_qr_data, size=6)
                     
                     # Add space and avoid line break issues with shorter lines

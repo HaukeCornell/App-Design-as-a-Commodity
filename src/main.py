@@ -521,6 +521,24 @@ def process_vibepay_payment():
             cut=True
         )
     
+    # Print confirmation that payment has been received
+    payment_received_lines = [
+        "PAYMENT RECEIVED!",
+        "Your payment has been successfully processed.",
+        "Generating your app now...",
+        time.strftime("%Y-%m-%d %H:%M:%S")
+    ]
+
+    if thermal_printer_manager.initialized:
+        try:
+            thermal_printer_manager.print_continuous_receipt(
+                payment_received_lines=payment_received_lines,
+                cut_after=False
+            )
+            add_log("Payment confirmation receipt printed.", "info")
+        except Exception as e:
+            add_log(f"Error printing payment confirmation receipt: {e}", "error")
+
     # Acquire the generation lock
     start_generation()
     
@@ -698,44 +716,22 @@ def toggle_payment_mode():
     # Log the mode change
     add_log(f"Payment mode switched from {current_mode} to {requested_mode}", "info")
     
-    # Try printing via the lp command (OS level) - a completely different approach
-    try:
-        # Create a temporary file with our message
-        import tempfile
-        
-        # Create a temporary text file for printing
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as temp_file:
-            message = f"""
-MODE CHANGED
-====================
+    # Generate updated receipt content for the new payment mode
+    receipt_content = get_initial_receipt_content()
 
-Now in {requested_mode.upper()} mode
-
-Time: {time.strftime('%H:%M:%S')}
-====================
-"""
-            temp_file.write(message)
-            temp_path = temp_file.name
-            
-        # Print via system command
-        import subprocess
-        add_log(f"Printing via system command to file: {temp_path}", "info")
-        result = subprocess.run(['lp', temp_path], capture_output=True, text=True)
-        
-        if result.returncode == 0:
-            add_log(f"System print command successful: {result.stdout}", "info")
-        else:
-            add_log(f"System print command failed: {result.stderr}", "error")
-            
-            # If system command fails, try the direct USB approach again
-            add_log("Trying direct USB approach as backup", "info")
-            from escpos.printer import Usb
-            printer = Usb(0x04b8, 0x0e03, 0)
-            printer.text(message)
-            printer.cut()
-        
-    except Exception as e:
-        add_log(f"All printing methods failed: {e}", "error")
+    # Print the updated receipt with the new payment mode details
+    if thermal_printer_manager.initialized:
+        try:
+            thermal_printer_manager.print_continuous_receipt(
+                initial_setup_lines=receipt_content["initial_setup_lines"],
+                venmo_qr_data=receipt_content["venmo_qr_data"],
+                cut_after=False
+            )
+            add_log(f"Receipt printed successfully for {requested_mode} mode.", "info")
+        except Exception as e:
+            add_log(f"Error printing receipt for {requested_mode} mode: {e}", "error")
+    else:
+        add_log("Thermal printer not initialized. Skipping receipt printing.", "warning")
     
     return jsonify({
         "message": f"Payment mode switched to {requested_mode}",

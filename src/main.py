@@ -56,7 +56,7 @@ GENERATED_APPS_DIR = os.path.abspath(os.path.join(_SCRIPT_DIR, "generated_apps")
 
 # Payment mode configuration
 PAYMENT_MODE = {
-    "current_mode": "venmo",  # "venmo" or "vibepay"
+    "current_mode": os.environ.get("INITIAL_PAYMENT_MODE", "venmo"),  # Get from environment or default to "venmo"
     "venmo": {
         "name": "Venmo", 
         "url": "https://venmo.com/code?user_id=3354253905100800472&created=1746493056.679508"
@@ -518,7 +518,7 @@ def process_vibepay_payment():
             header_lines=["VIBEPAY PAYMENT", "-------------"],
             body_lines=payment_details,
             footer_lines=["Please wait for your app..."],
-            cut=True
+            cut=False  # Ensure no cutting occurs when printing for VibePay interaction
         )
     
     # Print confirmation that payment has been received
@@ -529,15 +529,15 @@ def process_vibepay_payment():
         time.strftime("%Y-%m-%d %H:%M:%S")
     ]
 
-    if thermal_printer_manager.initialized:
-        try:
-            thermal_printer_manager.print_continuous_receipt(
-                payment_received_lines=payment_received_lines,
-                cut_after=False
-            )
-            add_log("Payment confirmation receipt printed.", "info")
-        except Exception as e:
-            add_log(f"Error printing payment confirmation receipt: {e}", "error")
+    # Always try to print, regardless of initialization status
+    try:
+        thermal_printer_manager.print_continuous_receipt(
+            payment_received_lines=payment_received_lines,
+            cut_after=False
+        )
+        add_log("Payment confirmation receipt printed.", "info")
+    except Exception as e:
+        add_log(f"Error printing payment confirmation receipt: {e}", "error")
 
     # Acquire the generation lock
     start_generation()
@@ -719,19 +719,16 @@ def toggle_payment_mode():
     # Generate updated receipt content for the new payment mode
     receipt_content = get_initial_receipt_content()
 
-    # Print the updated receipt with the new payment mode details
-    if thermal_printer_manager.initialized:
-        try:
-            thermal_printer_manager.print_continuous_receipt(
-                initial_setup_lines=receipt_content["initial_setup_lines"],
-                venmo_qr_data=receipt_content["venmo_qr_data"],
-                cut_after=False
-            )
-            add_log(f"Receipt printed successfully for {requested_mode} mode.", "info")
-        except Exception as e:
-            add_log(f"Error printing receipt for {requested_mode} mode: {e}", "error")
-    else:
-        add_log("Thermal printer not initialized. Skipping receipt printing.", "warning")
+    # Print the updated receipt with the new payment mode details - always try to print
+    try:
+        thermal_printer_manager.print_continuous_receipt(
+            initial_setup_lines=receipt_content["initial_setup_lines"],
+            venmo_qr_data=receipt_content["venmo_qr_data"],
+            cut_after=False
+        )
+        add_log(f"Receipt printed successfully for {requested_mode} mode.", "info")
+    except Exception as e:
+        add_log(f"Error printing receipt for {requested_mode} mode: {e}", "error")
     
     return jsonify({
         "message": f"Payment mode switched to {requested_mode}",

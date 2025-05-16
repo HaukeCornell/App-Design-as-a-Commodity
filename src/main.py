@@ -61,7 +61,7 @@ PAYMENT_MODE = {
     "venmo": {
         "name": "Venmo", 
         "url": "https://venmo.com/code?user_id=3354253905100800472&created=1746493056.679508",
-        "app_url": "venmo://paycharge?txn=pay&recipients=3354253905100800472&amount=0.25&note=Custom%20App%20Request"
+        "app_url": "venmo://paycharge?txn=pay&recipients=3354253905100800472&amount=0.25&note=Describe%20Custom%20App%20Here"
     },
     "vibepay": {
         "name": "VibePay",
@@ -69,10 +69,11 @@ PAYMENT_MODE = {
     }
 }
 
-# Initialize the thermal printer - simplified to always return True
+# Initialize the thermal printer - test connection by trying to print a blank line
 def init_thermal_printer():
-    """Check printer status - simplified to always return True."""
-    return True if thermal_printer_manager.printer else False
+    """Test printer connection by printing a blank line. Returns True if successful."""
+    # Try to print a blank line to test printer connection
+    return thermal_printer_manager.print_text("")
 
 # --- QR Code Generation --- 
 def generate_qr_code_base64(url: str) -> str:
@@ -191,7 +192,7 @@ def index():
 @app.route("/vibepay")
 def vibepay_payment():
     """Serve the VibePay simulation page."""
-    # ...existing code...
+    return render_template("vibepay.html")
 
 @app.route("/api/vibepay-payment", methods=["POST"])
 def process_vibepay_payment():

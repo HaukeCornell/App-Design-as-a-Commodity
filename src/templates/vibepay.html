@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VibePay - App Design as a Commodity</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f8f8f8;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 600px;
+            width: 100%;
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            color: #0074D9;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input, textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+        .btn {
+            background-color: #0074D9;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            border-radius: 4px;
+            width: 100%;
+            transition: background-color 0.3s;
+        }
+        .btn:hover {
+            background-color: #0056a7;
+        }
+        .success {
+            color: green;
+            text-align: center;
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #e7ffe7;
+            border-radius: 4px;
+            display: none;
+        }
+        .error {
+            color: red;
+            text-align: center;
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #ffe7e7;
+            border-radius: 4px;
+            display: none;
+        }
+        .pricing {
+            margin: 20px 0;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-radius: 4px;
+        }
+        .loading {
+            display: none;
+            text-align: center;
+            margin-top: 20px;
+        }
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #0074D9;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 2s linear infinite;
+            margin: 0 auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>VibePay</h1>
+        
+        <div class="pricing">
+            <p><strong>Pricing:</strong></p>
+            <ul>
+                <li>$0.25 - Quick App</li>
+                <li>$1.00 - High Quality App</li>
+            </ul>
+        </div>
+        
+        <form id="payment-form">
+            <div class="form-group">
+                <label for="amount">Amount ($)</label>
+                <input type="number" id="amount" name="amount" step="0.01" min="0.25" value="0.25" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="note">App Description</label>
+                <textarea id="note" name="note" rows="5" placeholder="Describe the app you want to have built..." required></textarea>
+            </div>
+            
+            <button type="submit" class="btn">Pay with VibePay</button>
+        </form>
+        
+        <div class="loading">
+            <div class="spinner"></div>
+            <p>Processing payment...</p>
+        </div>
+        
+        <div class="success">
+            Payment successful! Your app is being generated.
+            <p>You can close this window and check the kiosk for your app details.</p>
+        </div>
+        
+        <div class="error">
+            An error occurred while processing your payment. Please try again.
+        </div>
+    </div>
+    
+    <script>
+        document.getElementById('payment-form').addEventListener('submit', function(event) {
+            event.preventDefault();
+            
+            // Hide any previous messages
+            document.querySelector('.success').style.display = 'none';
+            document.querySelector('.error').style.display = 'none';
+            
+            // Show loading spinner
+            document.querySelector('.loading').style.display = 'block';
+            
+            // Get form data
+            const amount = document.getElementById('amount').value;
+            const note = document.getElementById('note').value;
+            
+            // Create payment object
+            const paymentData = {
+                amount: amount,
+                note: note
+            };
+            
+            // Send payment to server
+            fetch('/api/vibepay-payment', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(paymentData)
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Hide loading spinner
+                document.querySelector('.loading').style.display = 'none';
+                
+                if (data.success) {
+                    // Show success message
+                    document.querySelector('.success').style.display = 'block';
+                    // Reset form
+                    document.getElementById('payment-form').reset();
+                } else {
+                    // Show error message
+                    const errorElement = document.querySelector('.error');
+                    errorElement.textContent = data.error || 'An error occurred while processing your payment.';
+                    errorElement.style.display = 'block';
+                }
+            })
+            .catch(error => {
+                // Hide loading spinner
+                document.querySelector('.loading').style.display = 'none';
+                
+                // Show error message
+                const errorElement = document.querySelector('.error');
+                errorElement.textContent = 'Network error. Please check your connection and try again.';
+                errorElement.style.display = 'block';
+                console.error('Error:', error);
+            });
+        });
+    </script>
+</body>
+</html>

@@ -39,7 +39,9 @@ LOGGER_CONFIG = {
 PRINTER_CONFIG = {
     "vendor_id": 0x04b8,  # Epson
     "product_id": 0x0e03,  # TM-T20II
-    "profiles": ["TM-T20II", "TM-T20II-42col", "default"]
+    "profiles": ["default"],
+    "width": 48  # TM-T20 default width is 48 characters
+
 }
 
 # --- GitHub Configuration ---

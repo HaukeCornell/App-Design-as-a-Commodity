@@ -98,7 +98,7 @@ SESSION_CONFIG = {
 
 # --- Gemini AI Models Configuration ---
 GEMINI_MODELS = {
-    "pro": "gemini-2.5-pro-preview-03-25",
+    "pro": "gemini-2.5-pro-preview-05-06",
     "flash": "gemini-2.5-flash-preview-04-17",
     "readme": "gemini-1.5-flash-latest",
     "default": "gemini-1.5-pro-latest"

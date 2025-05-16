@@ -8,6 +8,8 @@ import re
 import sys
 import time
 from dotenv import load_dotenv
+# Import thermal printer for iteration updates
+from thermal_printer import thermal_printer_manager
 
 # Fix import paths
 import os
@@ -127,12 +129,14 @@ def generate_code_with_gemini(app_type: str, tier: str, readme_content: str) -> 
 
     except Exception as e:
         print(f"Error calling Gemini API: {e}")
-        # Add more detailed error info if available from the response object
-        if hasattr(response, "prompt_feedback"):
-            print(f"Prompt Feedback: {response.prompt_feedback}")
-        if hasattr(response, "candidates") and response.candidates:
-             print(f"Finish Reason: {response.candidates[0].finish_reason}")
-             print(f"Safety Ratings: {response.candidates[0].safety_ratings}")
+        # Safely access response info only if it was defined
+        response_var = locals().get('response')
+        if response_var:
+            if hasattr(response_var, "prompt_feedback"):
+                print(f"Prompt Feedback: {response_var.prompt_feedback}")
+            if hasattr(response_var, "candidates") and response_var.candidates:
+                print(f"Finish Reason: {response_var.candidates[0].finish_reason}")
+                print(f"Safety Ratings: {response_var.candidates[0].safety_ratings}")
         return None
 
 def generate_readme_with_gemini(app_type: str, amount: float, tier: str, app_id: str) -> str | None:
@@ -318,6 +322,16 @@ def generate_app_files(app_type: str, amount: float) -> dict | None:
             versions_dir = os.path.join(app_dir, "versions")
             os.makedirs(versions_dir, exist_ok=True)
             
+            # Print initial receipt message about iterations
+            thermal_printer_manager.print_text([
+                "GENERATING APP WITH ITERATIONS",
+                f"App ID: {app_id}",
+                f"Request: {app_type}",
+                f"Total iterations: {iterations}",
+                f"Starting generation...",
+                "--------------------"
+            ], align='left', cut=False)
+            
             # Save the initial version
             with open(os.path.join(versions_dir, "version_0.html"), "w", encoding="utf-8") as f:
                 f.write(current_html)
@@ -325,6 +339,22 @@ def generate_app_files(app_type: str, amount: float) -> dict | None:
             # Run through the requested number of iterations
             for i in range(1, iterations):
                 print(f"Performing improvement iteration {i} of {iterations-1}...")
+                
+                # Determine focus area based on iteration number
+                focus_area = "Core functionality"
+                if i <= 2:
+                    focus_area = "Core functionality & UX"
+                elif i <= 4:
+                    focus_area = "Visual design & UI"
+                else:
+                    focus_area = "Advanced features & polish"
+                
+                # Print iteration update to receipt
+                thermal_printer_manager.print_text([
+                    f"Iteration {i} of {iterations-1} starting...",
+                    f"Enhancing app: {app_title}",
+                    f"Focus: {focus_area}"
+                ], align='left', cut=False)
                 
                 # Improve the app
                 improved_html = improve_app_iteratively(
@@ -334,6 +364,12 @@ def generate_app_files(app_type: str, amount: float) -> dict | None:
                 # Save this iteration
                 with open(os.path.join(versions_dir, f"version_{i}.html"), "w", encoding="utf-8") as f:
                     f.write(improved_html)
+                
+                # Print iteration completion to receipt
+                thermal_printer_manager.print_text([
+                    f"Iteration {i} completed!",
+                    "--------------------"
+                ], align='left', cut=False)
                 
                 # Update current HTML for next iteration
                 current_html = improved_html
@@ -345,6 +381,16 @@ def generate_app_files(app_type: str, amount: float) -> dict | None:
         
         # Update slug mapping
         update_slug_mapping(app_id, app_slug)
+        
+        # Print completion message for iterations
+        if iterations > 1:
+            thermal_printer_manager.print_text([
+                "ALL ITERATIONS COMPLETE!",
+                f"App {app_id} successfully enhanced",
+                f"Total iterations performed: {iterations}",
+                f"Final version saved to index.html",
+                "--------------------"
+            ], align='left', cut=False)
         
         print(f"Generated app {app_id} at {output_path} with {iterations} iterations")
         
@@ -386,6 +432,12 @@ def improve_app_iteratively(html_content, app_type, tier, iteration_num, total_i
     """
     if not model:
         print("Gemini model not configured or configuration failed. Cannot improve app.")
+        # Print error to receipt
+        thermal_printer_manager.print_text([
+            f"ITERATION {iteration_num} ERROR:",
+            "Gemini model not configured",
+            "Using previous version"
+        ], align='left', cut=False)
         return html_content
     
     # Use the premium model for iterative improvement
@@ -424,13 +476,45 @@ def improve_app_iteratively(html_content, app_type, tier, iteration_num, total_i
         # Basic validation to ensure it's HTML
         if not improved_code.lower().startswith("<!doctype html") and not improved_code.lower().startswith("<html"):
             print(f"Warning: Improved code doesn't look like HTML. Using previous version.")
+            # Print warning to receipt
+            thermal_printer_manager.print_text([
+                f"ITERATION {iteration_num} WARNING:",
+                "Generated code is not valid HTML",
+                "Using previous version"
+            ], align='left', cut=False)
             return html_content
             
         print(f"Successfully improved app (Iteration {iteration_num}/{total_iterations})")
+        
+        # Calculate rough file size change as a metric of improvement
+        original_size = len(html_content)
+        new_size = len(improved_code)
+        size_diff = new_size - original_size
+        size_change = f"{'+' if size_diff > 0 else ''}{size_diff} bytes"
+        
+        # Print success to receipt with some basic stats
+        thermal_printer_manager.print_text([
+            f"Iteration {iteration_num} successful:",
+            f"Code size change: {size_change}",
+            f"Enhancements applied!"
+        ], align='left', cut=False)
+        
         return improved_code
         
     except Exception as e:
         print(f"Error improving app in iteration {iteration_num}: {e}")
+        # Safely access response info only if it was defined
+        response_var = locals().get('response')
+        if response_var and hasattr(response_var, "text"):
+            print(f"Response text starts with: {response_var.text[:100]}...")
+        
+        # Print error to receipt
+        thermal_printer_manager.print_text([
+            f"ITERATION {iteration_num} ERROR:",
+            f"{str(e)[:40]}...",
+            "Using previous version"
+        ], align='left', cut=False)
+        
         # Return original content on error
         return html_content
 

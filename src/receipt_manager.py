@@ -166,41 +166,32 @@ class ReceiptManager:
         try:
             # Get required app details with defaults
             app_id = app_details.get("app_id", "unknown")
-            app_type = app_details.get("app_type", "unknown")
             app_tier = app_details.get("tier", "unknown")
             github_url = app_details.get("github_url", "Not available")
             
-            # Format GitHub URL message
-            if "Error:" in github_url or "not found" in github_url or "denied" in github_url:
-                github_message = ["GITHUB PUSH FAILED.", "App was generated locally."]
-            else:
-                github_message = ["GitHub Repository:", github_url]
+            # Try to get a cleaner app name from the title field if available
+            app_title = app_details.get("title", "Custom App")
             
             # App completion section
             completion_lines = [
                 "--------------------",
                 "APP GENERATED SUCCESSFULLY!",
                 "--------------------",
-                f"App Type: {app_type}",
+                f"App: {app_title}",
                 f"Tier: {app_tier}",
-                f"ID: {app_id}",
-                ""
-            ]
-            completion_lines.extend(github_message)
-            completion_lines.extend([
                 "",
                 "Access your app at:",
                 hosted_url_full,
                 "",
                 "SCAN QR CODE TO USE YOUR APP:",
-            ])
+            ]
             
             thank_you_lines = [
                 "",
                 "Thank you for supporting",
                 "App Design as a Commodity",
                 "",
-                "Made with ♥ by Vibe Coder",
+                "Made with <3 by Vibe Coder",
                 time.strftime("%Y-%m-%d %H:%M:%S"),
                 "",
                 "",
@@ -214,11 +205,28 @@ class ReceiptManager:
                 thermal_printer_manager.print_qr(
                     hosted_url_full,
                     text_above="YOUR APP IS READY",
-                    text_below="Thank you for using Vibe Coder!",
+                    text_below="Scan to use your app",
                     cut=False,
-                    size=10  # Increase QR code size
+                    size=10  # Larger QR code for app access
                 )
-            
+                
+                # Print GitHub info and QR code if available
+                if github_url and "Error:" not in github_url and "not found" not in github_url and "denied" not in github_url:
+                    thermal_printer_manager.print_text([
+                        "",
+                        "GITHUB REPOSITORY:",
+                        "Scan to view source code:"
+                    ], align='center', cut=False)
+                    
+                    # Print GitHub QR code (smaller size)
+                    thermal_printer_manager.print_qr(
+                        github_url,
+                        text_above=None,
+                        text_below=None,
+                        cut=False,
+                        size=6  # Smaller QR code for GitHub
+                    )
+                
                 # Add a final thank you message and cut the paper
                 thermal_printer_manager.print_text(thank_you_lines, align='center', cut=True)
                 

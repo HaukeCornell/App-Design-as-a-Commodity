@@ -483,10 +483,26 @@ def generate_app_for_payment(app_type: str, payment_amount: float, user_who_paid
             # Generate QR code for the app (for UI)
             qr_code_base64 = generate_qr_code_base64(hosted_url_full)
             
+            # Try to extract a nice title from the README.md if it exists
+            app_title = actual_app_type  # Default to app_type if we can't extract a title
+            readme_path = os.path.join(generated_app_details["path"], "README.md")
+            if os.path.exists(readme_path):
+                try:
+                    with open(readme_path, 'r') as readme_file:
+                        readme_content = readme_file.read()
+                        # Look for the first markdown heading
+                        import re
+                        title_match = re.search(r'^#\s+(.+)$', readme_content, re.MULTILINE)
+                        if title_match:
+                            app_title = title_match.group(1).strip()
+                except Exception as e:
+                    add_log(f"Error extracting title from README: {e}", "warning")
+            
             # Use the receipt manager to print the app completion details
             app_details = {
                 "app_id": app_id,
                 "app_type": actual_app_type,
+                "title": app_title,  # Include the extracted title
                 "tier": app_tier,
                 "github_url": github_url
             }
@@ -543,23 +559,28 @@ if __name__ == "__main__":
     # Initialize the Thermal Printer System
     init_thermal_printer()
     
-    # Initialize receipt for current payment mode
-    current_mode = PAYMENT_MODE["current_mode"]
-    payment_service = PAYMENT_MODE[current_mode]["name"]
+    # Check if this is the initial run (not a Flask debug mode reload)
+    # The WERKZEUG_RUN_MAIN environment variable is set only on the reloaded instance
+    is_initial_run = os.environ.get('WERKZEUG_RUN_MAIN') != 'true'
     
-    # Get proper URL depending on payment mode
-    if current_mode == "venmo":
-        payment_url = PAYMENT_MODE[current_mode].get("app_url", PAYMENT_MODE[current_mode]["url"])
-    else:
-        payment_url = PAYMENT_MODE[current_mode]["url"]
-        # Format full URL for VibePay if needed
-        if payment_url.startswith("/"):
-            local_ip = get_local_ip()
-            port = int(os.getenv("PORT", 5002))
-            payment_url = f"http://{local_ip}:{port}{payment_url}"
-    
-    # Print initial payment header
-    receipt_manager.print_payment_header(payment_service, payment_url)
+    # Initialize receipt for current payment mode (only on initial run)
+    if is_initial_run:
+        current_mode = PAYMENT_MODE["current_mode"]
+        payment_service = PAYMENT_MODE[current_mode]["name"]
+        
+        # Get proper URL depending on payment mode
+        if current_mode == "venmo":
+            payment_url = PAYMENT_MODE[current_mode].get("app_url", PAYMENT_MODE[current_mode]["url"])
+        else:
+            payment_url = PAYMENT_MODE[current_mode]["url"]
+            # Format full URL for VibePay if needed
+            if payment_url.startswith("/"):
+                local_ip = get_local_ip()
+                port = int(os.getenv("PORT", 5002))
+                payment_url = f"http://{local_ip}:{port}{payment_url}"
+        
+        # Print initial payment header (only once)
+        receipt_manager.print_payment_header(payment_service, payment_url)
     
     # Use port 5002 for local testing
     port = int(os.getenv("PORT", 5002))

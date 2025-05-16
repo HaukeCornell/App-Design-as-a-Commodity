@@ -1,6 +1,8 @@
 #!/usr/bin/env python3.11
 import os
 import uuid
+import string
+import random
 import google.generativeai as genai
 import re
 import sys
@@ -32,6 +34,21 @@ else:
     except Exception as e:
         print(f"Error configuring Gemini API: {e}")
         model = None  # Set model to None if configuration fails
+
+def generate_friendly_app_id():
+    """
+    Generates a user-friendly app ID that's shorter and easier to read than a UUID.
+    Format: 4 letters + 4 digits (e.g., VIBE1234)
+    """
+    # Use uppercase letters only (avoiding similar looking characters like I, O, etc.)
+    letters = ''.join(c for c in string.ascii_uppercase if c not in 'IO')
+    digits = ''.join(d for d in string.digits if d not in '01')
+    
+    # Generate the ID: 4 letters + 4 digits
+    letters_part = ''.join(random.choices(letters, k=4))
+    digits_part = ''.join(random.choices(digits, k=4))
+    
+    return f"{letters_part}{digits_part}"
 
 def generate_code_with_gemini(app_type: str, tier: str, readme_content: str) -> str | None:
     """Generates HTML/CSS/JS code using Gemini based on app type, tier, and README content."""
@@ -144,7 +161,8 @@ def generate_readme_with_gemini(app_type: str, amount: float, tier: str, app_id:
 def generate_app_files(app_type: str, amount: float) -> dict | None:
     """Generates app files using Gemini, saves them, and returns details."""
     
-    app_id = str(uuid.uuid4()) # Unique ID for this app instance
+    # Generate a user-friendly app ID instead of UUID
+    app_id = generate_friendly_app_id()  # Shorter, more user-friendly ID
     app_dir = os.path.join(GENERATED_APPS_DIR, app_id)
     os.makedirs(app_dir, exist_ok=True)
     output_path = os.path.join(app_dir, "index.html")

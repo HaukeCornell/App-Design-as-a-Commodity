@@ -188,7 +188,20 @@ def init_venmo_system():
 def index():
     """Serve the main HTML page."""
     return send_from_directory(app.static_folder, "index.html")
+
+@app.route("/apps/<app_id>/", defaults={'path': 'index.html'})
+@app.route("/apps/<app_id>/<path:path>")
+def serve_generated_app(app_id, path):
+    """Serve files from generated apps directory."""
+    app_dir = os.path.join(GENERATED_APPS_DIR, app_id)
     
+    # Check if the app directory exists
+    if not os.path.isdir(app_dir):
+        return "App not found", 404
+        
+    # Serve the requested file from the app directory
+    return send_from_directory(app_dir, path)
+
 @app.route("/vibepay")
 def vibepay_payment():
     """Serve the VibePay simulation page."""

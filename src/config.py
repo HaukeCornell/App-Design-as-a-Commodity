@@ -110,21 +110,19 @@ APP_TIERS = {
         "min_amount": 0.0,
         "max_amount": 0.99,
         "model": GEMINI_MODELS["flash"],
-        "iterations": 1
+        "dollar_per_iteration": 1.0  # Simple $1 per iteration approach
     },
     "high": {
         "min_amount": 1.0,
         "max_amount": 4.99,
         "model": GEMINI_MODELS["pro"],
-        "iterations": 1
+        "dollar_per_iteration": 1.0  # Simple $1 per iteration approach
     },
     "premium": {
         "min_amount": 5.0,
         "max_amount": float("inf"),
         "model": GEMINI_MODELS["pro"],
-        # For premium tier, iterations are calculated based on dollar amount
-        "base_iterations": 1,
-        "dollar_per_iteration": 1.0
+        "dollar_per_iteration": 1.0  # Simple $1 per iteration approach
     }
 }
 
@@ -162,25 +160,15 @@ def get_app_tier(amount: float) -> str:
     
 def calculate_iterations(amount: float, tier: str) -> int:
     """
-    Calculate the number of iterations based on the payment amount and tier.
+    Calculate the number of iterations based on the payment amount.
+    Simple approach: each dollar = one iteration (rounded down, minimum 1).
     
     Args:
         amount: The payment amount
-        tier: The app tier ('low', 'high', or 'premium')
+        tier: The app tier ('low', 'high', or 'premium') - used only to get model info
         
     Returns:
         Number of iterations to perform
     """
-    if tier == "premium":
-        # For premium tier, calculate iterations based on dollar amount
-        base = APP_TIERS[tier].get("base_iterations", 1)
-        dollar_per_iteration = APP_TIERS[tier].get("dollar_per_iteration", 1.0)
-        
-        # Calculate additional iterations based on amount above minimum
-        min_amount = APP_TIERS[tier]["min_amount"]
-        additional = max(0, int((amount - min_amount) / dollar_per_iteration))
-        
-        return base + additional
-    else:
-        # For standard tiers, use the fixed iteration count
-        return APP_TIERS[tier].get("iterations", 1)
+    # Simple calculation: 1 dollar = 1 iteration, minimum 1 iteration
+    return max(1, int(amount))

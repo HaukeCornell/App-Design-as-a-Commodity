@@ -118,10 +118,9 @@
         <div class="pricing">
             <p><strong>Pricing:</strong></p>
             <ul>
-                <li>$0.25 - Quick App (1 iteration)</li>
-                <li>$1.00 - High Quality App (1 iteration)</li>
-                <li>$5.00+ - Premium App with multiple iterations</li>
-                <li><em>Each additional dollar adds one more iteration of AI improvement!</em></li>
+                <li>$0.25 minimum - Basic App (1 iteration)</li>
+                <li><strong>Each additional dollar = one extra iteration of AI improvement!</strong></li>
+                <li>Example: $3.00 = 3 iterations, $10.00 = 10 iterations</li>
             </ul>
         </div>
         
@@ -161,19 +160,12 @@
         function calculateIterations(amount) {
             amount = parseFloat(amount);
             
-            if (amount < 1.0) {
-                // Low tier
-                return 1;
-            } else if (amount < 5.0) {
-                // High tier
-                return 1;
+            if (amount < 0.25) {
+                return 1; // Minimum 1 iteration
             } else {
-                // Premium tier with additional iterations
-                const baseIterations = 1;
-                const minAmount = 5.0;
-                const dollarPerIteration = 1.0;
-                const additionalIterations = Math.max(0, Math.floor((amount - minAmount) / dollarPerIteration));
-                return baseIterations + additionalIterations;
+                // Simple calculation: 1 dollar = 1 iteration
+                // Round down to nearest whole number, minimum 1
+                return Math.max(1, Math.floor(amount));
             }
         }
         
@@ -185,12 +177,11 @@
             
             const iterations = calculateIterations(amount);
             
-            if (amount >= 5.0) {
-                pricingInfo.innerHTML = `<span class="premium-highlight">Premium: Your app will be improved through ${iterations} iterations!</span>`;
-            } else if (amount >= 1.0) {
-                pricingInfo.innerHTML = 'High Quality App (1 iteration) - Pay $5.00+ for multiple iterations!';
+            // Simple pricing info message for all amounts
+            if (iterations > 1) {
+                pricingInfo.innerHTML = `<span class="premium-highlight">Your app will be improved through ${iterations} iterations!</span>`;
             } else {
-                pricingInfo.innerHTML = 'Quick App (1 iteration) - Pay $5.00+ for multiple iterations!';
+                pricingInfo.innerHTML = 'Basic App (1 iteration) - Pay more for additional iterations!';
             }
         }
         
@@ -239,7 +230,7 @@
                     const iterationsMessage = document.getElementById('iterations-message');
                     
                     if (iterations > 1) {
-                        iterationsMessage.innerHTML = `<span class="premium-highlight">Your app will be improved through ${iterations} iterations for premium quality!</span>`;
+                        iterationsMessage.innerHTML = `<span class="premium-highlight">Your app will be improved through ${iterations} iterations!</span>`;
                     } else {
                         iterationsMessage.textContent = 'Your app will be generated with 1 iteration.';
                     }

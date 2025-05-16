@@ -90,9 +90,8 @@ def venmo_scanned():
         "message": "Scan recorded. Check your Venmo app to complete payment.",
         "instructions": "In the payment note, describe the app you want to have built.",
         "pricing": {
-            "quick_app": "$0.25 (1 iteration)",
-            "high_quality_app": "$1.00 (1 iteration)",
-            "premium_app": "$5.00+ (Multiple iterations - $1 per additional iteration)"
+            "basic": "$0.25 minimum (1 iteration)",
+            "improved": "Each additional dollar = 1 additional iteration"
         }
     })
 

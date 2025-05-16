@@ -108,13 +108,23 @@ GEMINI_MODELS = {
 APP_TIERS = {
     "low": {
         "min_amount": 0.0,
-        "max_amount": 4.99,
-        "model": GEMINI_MODELS["flash"]
+        "max_amount": 0.99,
+        "model": GEMINI_MODELS["flash"],
+        "iterations": 1
     },
     "high": {
+        "min_amount": 1.0,
+        "max_amount": 4.99,
+        "model": GEMINI_MODELS["pro"],
+        "iterations": 1
+    },
+    "premium": {
         "min_amount": 5.0,
         "max_amount": float("inf"),
-        "model": GEMINI_MODELS["pro"]
+        "model": GEMINI_MODELS["pro"],
+        # For premium tier, iterations are calculated based on dollar amount
+        "base_iterations": 1,
+        "dollar_per_iteration": 1.0
     }
 }
 
@@ -143,9 +153,34 @@ def get_app_tier(amount: float) -> str:
         amount: The payment amount
         
     Returns:
-        String representing the tier ('low' or 'high')
+        String representing the tier ('low', 'high', or 'premium')
     """
     for tier, config in APP_TIERS.items():
         if config["min_amount"] <= amount <= config["max_amount"]:
             return tier
     return "low"  # Default to low tier if no match
+    
+def calculate_iterations(amount: float, tier: str) -> int:
+    """
+    Calculate the number of iterations based on the payment amount and tier.
+    
+    Args:
+        amount: The payment amount
+        tier: The app tier ('low', 'high', or 'premium')
+        
+    Returns:
+        Number of iterations to perform
+    """
+    if tier == "premium":
+        # For premium tier, calculate iterations based on dollar amount
+        base = APP_TIERS[tier].get("base_iterations", 1)
+        dollar_per_iteration = APP_TIERS[tier].get("dollar_per_iteration", 1.0)
+        
+        # Calculate additional iterations based on amount above minimum
+        min_amount = APP_TIERS[tier]["min_amount"]
+        additional = max(0, int((amount - min_amount) / dollar_per_iteration))
+        
+        return base + additional
+    else:
+        # For standard tiers, use the fixed iteration count
+        return APP_TIERS[tier].get("iterations", 1)

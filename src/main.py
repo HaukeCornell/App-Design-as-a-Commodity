@@ -31,7 +31,7 @@ from thermal_printer import thermal_printer_manager
 from venmo_email import email_processor, init_email_monitoring
 from venmo_qr import venmo_qr_manager
 from venmo_config import VENMO_CONFIG, EMAIL_CONFIG
-from config import PRINTER_CONFIG  # Import printer config
+from config import PRINTER_CONFIG, get_app_tier, calculate_iterations  # Import config and tier/iteration functions
 from github_service import github_service
 from app_generator import generate_app_files
 from receipt_manager import receipt_manager  # Import the new receipt manager
@@ -294,9 +294,16 @@ def process_vibepay_payment():
             "processed": True  # Mark as already processed to prevent duplicate generation from UI
         }
         
+        # Calculate tier and iterations
+        tier = get_app_tier(amount)
+        iterations = calculate_iterations(amount, tier)
+        
         return jsonify({
             "success": True,
-            "message": "Payment processed successfully"
+            "message": "Payment processed successfully",
+            "tier": tier,
+            "iterations": iterations,
+            "amount": amount
         })
     except Exception as e:
         # Release lock on error
@@ -331,8 +338,9 @@ def venmo_scanned():
         "message": f"Scan recorded. Check your {payment_service} app to complete payment.",
         "instructions": f"In the {payment_service} note, describe the app you want to have built.",
         "pricing": {
-            "quick_app": "$0.25",
-            "high_quality_app": "$1.00"
+            "quick_app": "$0.25 (1 iteration)",
+            "high_quality_app": "$1.00 (1 iteration)",
+            "premium_app": "$5.00+ (Multiple iterations - $1 per additional iteration)"
         }
     })
 
@@ -528,12 +536,17 @@ def generate_app_for_payment(app_type: str, payment_amount: float, user_who_paid
                 except Exception as e:
                     add_log(f"Error extracting title from README: {e}", "warning")
             
+            # Get iteration count if available
+            iterations = generated_app_details.get("iterations", 1)
+            
             # Use the receipt manager to print the app completion details
             app_details = {
                 "app_id": app_id,
                 "app_type": actual_app_type,
                 "title": app_title,  # Include the extracted title
                 "tier": app_tier,
+                "amount": payment_amount,  # Include payment amount
+                "iterations": iterations,  # Include iteration count
                 "github_url": github_url
             }
             receipt_manager.print_app_completion(app_details, hosted_url_full)
@@ -542,14 +555,17 @@ def generate_app_for_payment(app_type: str, payment_amount: float, user_who_paid
             venmo_qr_manager.last_generated_app = {
                 "app_id": generated_app_details["app_id"],
                 "app_type": generated_app_details["app_type"],
+                "title": app_title,
                 "tier": generated_app_details["tier"],
+                "iterations": iterations,  # Include iterations count
                 "hosted_url_full": hosted_url_full,
                 "hosted_url_relative": hosted_url_relative,
                 "github_url": github_url,
                 "qr_code_image": qr_code_base64,
-                "message": f"App {generated_app_details['app_id']} generated successfully (Tier: {generated_app_details['tier']}).",
+                "message": f"App {app_title} generated successfully with {iterations} iterations (Tier: {generated_app_details['tier']}).",
                 "readme_generated": "readme_path" in generated_app_details,
                 "timestamp": time.time(),
+                "payment_amount": payment_amount,  # Include payment amount
                 "logs": log_msg
             }
             

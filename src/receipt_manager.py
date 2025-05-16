@@ -172,6 +172,9 @@ class ReceiptManager:
             # Try to get a cleaner app name from the title field if available
             app_title = app_details.get("title", "Custom App")
             
+            # Get information about iterations if available
+            iterations = app_details.get("iterations", 1)
+            
             # App completion section
             completion_lines = [
                 "--------------------",
@@ -179,12 +182,22 @@ class ReceiptManager:
                 "--------------------",
                 f"App: {app_title}",
                 f"Tier: {app_tier}",
+            ]
+            
+            # Add iterations information if more than one
+            if iterations > 1:
+                completion_lines.extend([
+                    f"Iterations: {iterations}",
+                    f"(Extra quality from your ${app_details.get('amount', 1.0):.2f} payment!)"
+                ])
+                
+            completion_lines.extend([
                 "",
                 "Access your app at:",
                 hosted_url_full,
                 "",
                 "SCAN QR CODE TO USE YOUR APP:",
-            ]
+            ])
             
             thank_you_lines = [
                 "",

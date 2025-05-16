@@ -249,8 +249,10 @@ def generate_app_files(app_type: str, amount: float) -> dict | None:
     output_path = os.path.join(app_dir, "index.html")
     readme_path = os.path.join(app_dir, "README.md")
 
-    # Determine tier based on amount
+    # Determine tier and iterations based on amount
+    from config import calculate_iterations
     tier = get_app_tier(amount)
+    iterations = calculate_iterations(amount, tier)
 
     # Generate README.md using Gemini Flash first
     generated_readme = generate_readme_with_gemini(app_type, amount, tier, app_id)
@@ -297,18 +299,54 @@ def generate_app_files(app_type: str, amount: float) -> dict | None:
 
     # --- Save Generated Files ---
     try:
-        # Save README.md file
+        # Save README.md file with information about iterations
+        if iterations > 1:
+            # Add information about iterations to the README
+            generated_readme += f"\n\n## Generation Process\n\nThis app was created with {iterations} iterations of AI improvement based on your payment of ${amount:.2f}.\n"
+        
         with open(readme_path, "w", encoding="utf-8") as f:
             f.write(generated_readme)
 
-        # Save HTML file
+        # Perform iterative improvements if applicable
+        current_html = generated_html
+        iteration_history = [current_html]  # Keep track of each iteration
+        
+        if iterations > 1:
+            print(f"Starting iterative improvement: {iterations} iterations requested")
+            
+            # Create a versions directory to store each iteration
+            versions_dir = os.path.join(app_dir, "versions")
+            os.makedirs(versions_dir, exist_ok=True)
+            
+            # Save the initial version
+            with open(os.path.join(versions_dir, "version_0.html"), "w", encoding="utf-8") as f:
+                f.write(current_html)
+            
+            # Run through the requested number of iterations
+            for i in range(1, iterations):
+                print(f"Performing improvement iteration {i} of {iterations-1}...")
+                
+                # Improve the app
+                improved_html = improve_app_iteratively(
+                    current_html, app_type, tier, i, iterations-1
+                )
+                
+                # Save this iteration
+                with open(os.path.join(versions_dir, f"version_{i}.html"), "w", encoding="utf-8") as f:
+                    f.write(improved_html)
+                
+                # Update current HTML for next iteration
+                current_html = improved_html
+                iteration_history.append(current_html)
+        
+        # Save the final HTML file
         with open(output_path, "w", encoding="utf-8") as f:
-            f.write(generated_html)
+            f.write(current_html)
         
         # Update slug mapping
         update_slug_mapping(app_id, app_slug)
         
-        print(f"Generated app 	{app_id}	 at 	{output_path}")
+        print(f"Generated app {app_id} at {output_path} with {iterations} iterations")
         
         return {
             "app_id": app_id,
@@ -317,9 +355,11 @@ def generate_app_files(app_type: str, amount: float) -> dict | None:
             "slug": app_slug,          # URL-friendly version of the title
             "amount": amount,
             "tier": tier,
+            "iterations": iterations,   # Number of iterations performed
             "path": app_dir,           # Directory containing the generated app (index.html)
             "file_path": output_path,  # Specific path to the index.html file
-            "readme_path": readme_path  # Path to the README.md file
+            "readme_path": readme_path, # Path to the README.md file
+            "iteration_history": len(iteration_history)  # Number of versions saved
         }
 
     except Exception as e:
@@ -329,6 +369,70 @@ def generate_app_files(app_type: str, amount: float) -> dict | None:
             import shutil
             shutil.rmtree(app_dir)
         return None
+
+def improve_app_iteratively(html_content, app_type, tier, iteration_num, total_iterations):
+    """
+    Improves an existing app through iterative refinement.
+    
+    Args:
+        html_content: The current HTML content of the app
+        app_type: The type of application requested
+        tier: The app tier (low, high, premium)
+        iteration_num: The current iteration number
+        total_iterations: The total number of iterations to be performed
+        
+    Returns:
+        Improved HTML content
+    """
+    if not model:
+        print("Gemini model not configured or configuration failed. Cannot improve app.")
+        return html_content
+    
+    # Use the premium model for iterative improvement
+    model_name = APP_TIERS["premium"]["model"]
+    model_to_use = genai.GenerativeModel(model_name)
+    
+    prompt = (
+        f"You are improving a single-file web application through iteration {iteration_num} of {total_iterations}.\n\n"
+        f"ORIGINAL USER REQUEST: \"{app_type}\"\n\n"
+        f"CURRENT HTML CONTENT: \n```html\n{html_content}\n```\n\n"
+        f"Instructions for improvement (iteration {iteration_num}/{total_iterations}):\n"
+        f"1. Analyze the current app and identify opportunities for enhancement\n"
+        f"2. For this iteration, focus on the following aspects:\n"
+        f"   - Iteration 1-2: Core functionality and user experience improvements\n"
+        f"   - Iteration 3-4: Visual design and UI refinements\n"
+        f"   - Iteration 5+: Advanced features and polish\n"
+        f"3. Implement meaningful improvements while maintaining all existing functionality\n"
+        f"4. Keep all the original features but enhance them\n"
+        f"5. Provide a complete, updated version of the single HTML file\n\n"
+        f"Return ONLY the improved HTML code without any explanation or markdown formatting. "
+        f"Start with <!DOCTYPE html> and end with </html>."
+    )
+    
+    try:
+        print(f"--- Sending Gemini prompt for app improvement (Iteration {iteration_num}/{total_iterations}) ---")
+        response = model_to_use.generate_content(prompt)
+        
+        # Extract code from response
+        code_match = re.search(r"```(?:html)?\n(.*?)\n```", response.text, re.DOTALL | re.IGNORECASE)
+        if code_match:
+            improved_code = code_match.group(1).strip()
+        else:
+            # Assume the whole response is the code if no markdown block found
+            improved_code = response.text.strip()
+        
+        # Basic validation to ensure it's HTML
+        if not improved_code.lower().startswith("<!doctype html") and not improved_code.lower().startswith("<html"):
+            print(f"Warning: Improved code doesn't look like HTML. Using previous version.")
+            return html_content
+            
+        print(f"Successfully improved app (Iteration {iteration_num}/{total_iterations})")
+        return improved_code
+        
+    except Exception as e:
+        print(f"Error improving app in iteration {iteration_num}: {e}")
+        # Return original content on error
+        return html_content
 
 # Example usage (for testing - requires GEMINI_API_KEY env var):
 if __name__ == "__main__":

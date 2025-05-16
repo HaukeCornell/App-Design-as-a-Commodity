@@ -1,309 +1,132 @@
 #!/usr/bin/env python3.11
 """
-Venmo QR code management module.
-This module handles the generation and management of Venmo QR codes,
-as well as processing Venmo payments received through the email system.
+VenmoQRManager - Handles the Venmo QR code generation and payment processing.
 """
 import os
 import time
+import json
 import uuid
 import logging
+from typing import Dict, Any, Optional, Callable
+import qrcode
 import base64
-from typing import Dict, Optional, Any, Callable
-from datetime import datetime, timedelta
+import io
 
-# Fix import paths
-import os
-import sys
-current_dir = os.path.dirname(os.path.abspath(__file__))
-if current_dir not in sys.path:
-    sys.path.insert(0, current_dir)
-
-# Import config
-from venmo_config import VENMO_CONFIG, SESSION_CONFIG
-
-# Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger('venmo_qr')
+# Relative imports
+from venmo_config import VENMO_CONFIG
+from receipt_manager import receipt_manager  # Import the new receipt manager
 
 class VenmoQRManager:
-    """Manager class for handling Venmo QR codes and payment sessions."""
+    """Manages the Venmo QR code and payment processing."""
     
     def __init__(self):
-        """Initialize the Venmo QR manager."""
-        self.sessions = {}  # Dictionary to store active sessions
-        self.base_url = None  # Base URL for the application (set on first request)
-        self.qr_code_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 
-                                         "venmo-haukesa-qr-code.png")
-        
-        # Last received payment (for UI display)
+        self.venmo_base_url = VENMO_CONFIG.get("venmo_profile_url", "")
+        self.qr_code_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "venmo_qr.png")
         self.last_payment = None
-        
-        # Last generated app (for UI display)
         self.last_generated_app = None
-        
-    def set_base_url(self, url: str) -> None:
-        """Set the base URL for the application."""
-        self.base_url = url
-        logger.info(f"Base URL set to: {url}")
-        
+        self.payment_callback = None
+        self.sessions = {}
+
+    def set_base_url(self, url: Optional[str]) -> None:
+        """Set the Venmo base URL."""
+        self.venmo_base_url = url or VENMO_CONFIG.get("venmo_profile_url", "")
+
+    def register_payment_callback(self, callback: Callable[[Dict[str, Any]], bool]) -> None:
+        """Register a callback function for processing payments."""
+        self.payment_callback = callback
+
     def get_venmo_qr_code(self) -> str:
-        """
-        Get the base64-encoded Venmo QR code image.
-        
-        Returns:
-            Base64-encoded PNG image of the QR code
-        """
+        """Get the Venmo QR code as a base64-encoded string."""
         try:
-            # Read the static QR code file if it exists
             if os.path.exists(self.qr_code_path):
                 with open(self.qr_code_path, "rb") as f:
-                    img_data = f.read()
-                    img_base64 = base64.b64encode(img_data).decode("utf-8")
-                    logger.info("Successfully loaded Venmo QR code image")
-                    return img_base64
+                    return base64.b64encode(f.read()).decode("utf-8")
             else:
-                # The file doesn't exist, so generate a QR code for the Venmo URL
-                logger.warning("Static QR code not found, dynamically generating one")
-                import qrcode
-                import io
-                
-                # Direct Venmo URL - this is the URL from your shared QR code
-                venmo_url = VENMO_CONFIG.get("venmo_direct_url", 
-                "https://www.paypal.com/qrcodes/venmocs/4445b00a-757b-4832-836e-d53d3c37c0c5?created=1746487649.347355&printed=1")
-                
-                # Create QR code
-                qr = qrcode.QRCode(
-                    version=1,
-                    error_correction=qrcode.constants.ERROR_CORRECT_L,
-                    box_size=10,
-                    border=4,
-                )
-                qr.add_data(venmo_url)
-                qr.make(fit=True)
-                img = qr.make_image(fill_color="black", back_color="white")
-                
-                # Save to buffer and convert to base64
-                buffer = io.BytesIO()
-                img.save(buffer, format="PNG")
-                buffer.seek(0)
-                img_base64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
-                
-                # Save for future use
-                try:
-                    with open(self.qr_code_path, "wb") as f:
-                        f.write(buffer.getvalue())
-                    logger.info(f"Saved generated QR code to {self.qr_code_path}")
-                except Exception as e:
-                    logger.error(f"Failed to save QR code: {e}")
-                
-                return img_base64
+                # Generate QR code dynamically
+                if self.venmo_base_url:
+                    return self.generate_venmo_qr_base64()
+                return ""
         except Exception as e:
-            logger.error(f"Error loading Venmo QR code image: {e}")
+            logging.error(f"Error getting Venmo QR code: {e}")
             return ""
-        
-    def create_payment_session(self, app_type: str) -> Dict[str, Any]:
-        """
-        Create a new payment session for a requested app.
-        
-        Args:
-            app_type: The type of app being requested
+
+    def generate_venmo_qr_base64(self) -> str:
+        """Generate a base64-encoded QR code for the Venmo URL."""
+        try:
+            qr = qrcode.QRCode(
+                version=1,
+                error_correction=qrcode.constants.ERROR_CORRECT_L,
+                box_size=10,
+                border=4,
+            )
+            qr.add_data(self.venmo_base_url)
+            qr.make(fit=True)
+            img = qr.make_image(fill_color="black", back_color="white")
             
-        Returns:
-            Dict containing session details including session_id and venmo_qr_code
-        """
-        # Generate a unique session ID
-        session_id = str(uuid.uuid4())
-        
-        # Create the session object
-        session = {
-            "id": session_id,
-            "created_at": time.time(),
-            "expires_at": time.time() + SESSION_CONFIG["session_timeout"],
-            "app_type": app_type,
-            "paid": False,
-            "amount": None,
-            "payment_timestamp": None,
-            "sender": None,
-            "payment_id": None,
-            "payment_note": None
-        }
-        
-        # Store the session
-        self.sessions[session_id] = session
-        logger.info(f"Created new payment session {session_id} for app type: {app_type}")
-        
-        # Clean up expired sessions
-        self._clean_expired_sessions()
-        
-        return {
-            "session_id": session_id,
-            "venmo_qr_code": self.get_venmo_qr_code(),
-            "venmo_profile_url": VENMO_CONFIG["venmo_profile_url"],
-            "expires_at": session["expires_at"],
-            "min_amount": VENMO_CONFIG["min_amount"],
-            "max_amount": VENMO_CONFIG["max_amount"]
-        }
-        
+            # Save to buffer and encode
+            buffer = io.BytesIO()
+            img.save(buffer, format="PNG")
+            buffer.seek(0)
+            
+            # Save to file for caching
+            try:
+                with open(self.qr_code_path, "wb") as f:
+                    f.write(buffer.getvalue())
+                logging.info(f"Venmo QR code saved to {self.qr_code_path}")
+            except Exception as e:
+                logging.error(f"Error saving Venmo QR code to file: {e}")
+            
+            # Return base64 encoded string
+            return base64.b64encode(buffer.getvalue()).decode("utf-8")
+        except Exception as e:
+            logging.error(f"Error generating Venmo QR code: {e}")
+            return ""
+
     def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Get a session by ID."""
+        return self.sessions.get(session_id)
+
+    def create_session(self, app_type: str) -> Dict[str, str]:
+        """Create a new session for a payment."""
+        session_id = str(uuid.uuid4())
+        self.sessions[session_id] = {
+            "app_type": app_type,
+            "created": time.time(),
+            "paid": False,
+            "amount": 0
+        }
+        return {"session_id": session_id}
+
+    def handle_payment(self, payment_data: Dict[str, Any]) -> bool:
         """
-        Get details for an existing session.
-        
-        Args:
-            session_id: The session ID to retrieve
-            
-        Returns:
-            Session dictionary or None if not found
-        """
-        session = self.sessions.get(session_id)
-        
-        if not session:
-            logger.warning(f"Session {session_id} not found")
-            return None
-            
-        # Check if the session has expired
-        if time.time() > session["expires_at"]:
-            logger.warning(f"Session {session_id} has expired")
-            self._clean_expired_sessions()
-            return None
-            
-        return session
-        
-    def update_session(self, session_id: str, updates: Dict[str, Any]) -> bool:
-        """
-        Update an existing session with new data.
-        
-        Args:
-            session_id: The session ID to update
-            updates: Dictionary of fields to update
-            
-        Returns:
-            True if successful, False if session not found
-        """
-        session = self.get_session(session_id)
-        if not session:
-            return False
-            
-        # Update the session with the new data
-        for key, value in updates.items():
-            session[key] = value
-            
-        return True
-        
-    def handle_payment(self, payment_data: Dict[str, Any], session_id: str = None) -> bool:
-        """
-        Process a Venmo payment and associate it with a session.
-        
-        Args:
-            payment_data: The payment data from the Venmo email
-            session_id: Optional session ID to associate with
-            
-        Returns:
-            True if payment was successfully processed
+        Process a Venmo payment.
+        Returns True if payment was successfully handled.
         """
         try:
-            # Check for specific keywords in the email body
-            body_text = payment_data.get("body_text", "").lower()
-            note = payment_data.get("note", "")
+            # Store the payment data
+            self.last_payment = payment_data
             
-            # Use the note exactly as parsed from the email
-            # The note is already extracted with the best possible accuracy in venmo_email.py
-            # Just log what we got for debugging purposes
-            logger.info(f"Using app description from payment note: '{note}'")
+            # Grab the app description from the note field
+            app_description = payment_data.get("note", "Simple app").strip()
             
-            logger.info(f"Processing payment: ${payment_data['amount']} with note: {note}")
-            
-            # Store the last payment for display in the UI
-            self.last_payment = {
-                "amount": payment_data.get("amount"),
-                "note": note,  # Use the potentially updated note
-                "sender": payment_data.get("sender"),
-                "timestamp": time.time(),
-                "payment_id": payment_data.get("payment_id"),
-                "body_text": body_text  # Store body text for debugging
-            }
-            
-            # If no session_id is provided, this may be a direct payment without a session
-            if not session_id or session_id == "default":
-                logger.info("No specific session provided, handling as direct payment")
-                # Here we'll automatically generate an app for direct payments
-                try:
-                    # Import here to avoid circular imports
-                    import sys
-                    current_dir = os.path.dirname(os.path.abspath(__file__))
-                    parent_dir = os.path.dirname(current_dir)
-                    if parent_dir not in sys.path:
-                        sys.path.insert(0, parent_dir)
-                    
-                    # Use a direct import instead of src.main
-                    from main import generate_app_for_payment, can_generate_new_app, start_generation
-                    
-                    # Make sure the note is valid and not just sender info
-                    if note and len(note) > 5 and "paid you" not in note.lower():
-                        # Check if we can generate a new app (using the global lock mechanism)
-                        if can_generate_new_app():
-                            # Acquire the generation lock
-                            start_generation()
-                            logger.info(f"Starting app generation for payment: {note}")
-                            
-                            # Call directly instead of starting a new thread
-                            # This ensures we don't have multiple threads running simultaneously
-                            generate_app_for_payment(
-                                note, 
-                                payment_data.get("amount", 0.25),
-                                payment_data.get("sender", "VibePay User")
-                            )
-                        else:
-                            logger.warning("Cannot generate app: another generation is in progress or cooldown is active")
-                    else:
-                        logger.error(f"Invalid app description detected: '{note}'. Cannot generate app without a valid description.")
-                except Exception as gen_error:
-                    logger.error(f"Failed to start app generation: {gen_error}")
+            # Call the payment callback if registered
+            if self.payment_callback:
+                return self.payment_callback(payment_data)
                 
-                return True
-                
-            # Get the session
-            session = self.get_session(session_id)
-            if not session:
-                logger.warning(f"Cannot process payment: Session {session_id} not found or expired")
-                return False
-                
-            # Update the session with payment information
-            payment_updates = {
-                "paid": True,
-                "amount": payment_data.get("amount"),
-                "payment_timestamp": time.time(),
-                "sender": payment_data.get("sender"),
-                "payment_id": payment_data.get("payment_id"),
-                "payment_note": note  # Use the potentially updated note
-            }
+            # Import here to avoid circular imports
+            from main import generate_app_for_payment
             
-            self.update_session(session_id, payment_updates)
-            logger.info(f"Payment processed for session {session_id}")
+            # If no callback registered, process directly
+            amount = float(payment_data.get("amount", 0))
+            sender = payment_data.get("sender", "Unknown")
+            
+            # Generate the app
+            generate_app_for_payment(app_description, amount, sender)
             
             return True
-            
         except Exception as e:
-            logger.error(f"Error processing payment: {e}")
+            logging.error(f"Error handling payment: {e}")
             return False
-            
-    def _clean_expired_sessions(self) -> None:
-        """Remove expired sessions from the sessions dictionary."""
-        current_time = time.time()
-        expired_ids = []
-        
-        for session_id, session in self.sessions.items():
-            if current_time > session["expires_at"]:
-                expired_ids.append(session_id)
-                
-        for session_id in expired_ids:
-            del self.sessions[session_id]
-            
-        if expired_ids:
-            logger.info(f"Cleaned {len(expired_ids)} expired sessions")
 
-# Create a singleton instance for app-wide use
+# Create a global instance for use by other modules
 venmo_qr_manager = VenmoQRManager()

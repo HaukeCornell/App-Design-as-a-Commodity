@@ -16,7 +16,7 @@ class ReceiptManager:
     """Manages the printing of receipts for the app purchase workflow."""
     
     def __init__(self):
-        self.initialized = thermal_printer_manager.initialized
+        # Simplified - printer is always considered available (will print to console if not)
         self.current_transaction_in_progress = False
         # Configure logger
         logging.basicConfig(level=logging.INFO)
@@ -33,7 +33,7 @@ class ReceiptManager:
         """
         # Cut the paper to start a new transaction
         if self.current_transaction_in_progress:
-            self._cut_paper()
+            thermal_printer_manager.cut_paper()
             self.current_transaction_in_progress = False
         
         # Mark that we're starting a new transaction
@@ -67,32 +67,31 @@ class ReceiptManager:
             "",
         ]
         
-        if self.initialized:
-            try:
-                # Print the header
-                thermal_printer_manager.print_text(header_lines, align='center', cut=False)
-                
-                # Print the payment QR code
-                thermal_printer_manager.print_qr(
-                    payment_url, 
-                    text_above=f"PAY WITH {payment_mode.upper()}", 
-                    text_below="Include app description in payment note",
-                    cut=False
-                )
-                
-                # Add a waiting message
-                thermal_printer_manager.print_text([
-                    "",
-                    "WAITING FOR PAYMENT...",
-                    time.strftime("%H:%M:%S"),
-                    "",
-                    "",
-                ], align='center', cut=False)
-                
-                self.logger.info(f"Payment header printed for {payment_mode}")
-            except Exception as e:
-                self.logger.error(f"Error printing payment header: {e}")
-                # Still consider this a successful print for flow purposes
+        try:
+            # Print the header
+            thermal_printer_manager.print_text(header_lines, align='center', cut=False)
+            
+            # Print the payment QR code
+            thermal_printer_manager.print_qr(
+                payment_url, 
+                text_above=f"PAY WITH {payment_mode.upper()}", 
+                text_below="Include app description in payment note",
+                cut=False
+            )
+            
+            # Add a waiting message
+            thermal_printer_manager.print_text([
+                "",
+                "WAITING FOR PAYMENT...",
+                time.strftime("%H:%M:%S"),
+                "",
+                "",
+            ], align='center', cut=False)
+            
+            self.logger.info(f"Payment header printed for {payment_mode}")
+        except Exception as e:
+            self.logger.error(f"Error printing payment header: {e}")
+            # Still consider this a successful print for flow purposes
         else:
             # Console fallback when printer not available
             self.logger.info("\n----- PAYMENT HEADER (CONSOLE FALLBACK) -----")
@@ -141,16 +140,9 @@ class ReceiptManager:
                 "",
             ]
             
-            if self.initialized:
-                # Print to thermal printer
-                thermal_printer_manager.print_text(confirmation_lines, align='left', cut=False)
-                self.logger.info("Payment confirmation printed to thermal printer")
-            else:
-                # Console fallback
-                self.logger.info("\n----- PAYMENT CONFIRMATION (CONSOLE FALLBACK) -----")
-                for line in confirmation_lines:
-                    self.logger.info(line)
-                self.logger.info("----------------------------------------")
+            # Print to thermal printer - simplified implementation
+            thermal_printer_manager.print_text(confirmation_lines, align='left', cut=False)
+            self.logger.info("Payment confirmation printed")
             
             return True
             
@@ -214,31 +206,29 @@ class ReceiptManager:
                 "",
             ]
             
-            if self.initialized:
-                # Print to thermal printer
-                # Print the completion message
-                thermal_printer_manager.print_text(completion_lines, align='left', cut=False)
-                
-                # Print the QR code to access the app
-                try:
-                    thermal_printer_manager.print_qr(
-                        hosted_url_full,
-                        text_above="YOUR APP IS READY",
-                        text_below="Thank you for using Vibe Coder!",
-                        cut=False
-                    )
-                except Exception as e:
-                    self.logger.error(f"Error printing QR code: {e}")
-                    # Print URL as fallback
-                    thermal_printer_manager.print_text([
-                        "QR CODE ERROR - USE URL BELOW:",
-                        hosted_url_full,
-                    ], align='center', cut=False)
-                
-                # Add a final thank you message
+            # Print to thermal printer - completion message
+            thermal_printer_manager.print_text(completion_lines, align='left', cut=False)
+            
+            # Print the QR code to access the app
+            try:
+                thermal_printer_manager.print_qr(
+                    hosted_url_full,
+                    text_above="YOUR APP IS READY",
+                    text_below="Thank you for using Vibe Coder!",
+                    cut=False
+                )
+            
+                # Add a final thank you message and cut the paper
                 thermal_printer_manager.print_text(thank_you_lines, align='center', cut=True)
                 
                 self.logger.info("App completion receipt printed and paper cut")
+            except Exception as e:
+                self.logger.error(f"Error printing QR code: {e}")
+                # Print URL as fallback
+                thermal_printer_manager.print_text([
+                    "QR CODE ERROR - USE URL BELOW:",
+                    hosted_url_full,
+                ], align='center', cut=False)
             else:
                 # Console fallback
                 self.logger.info("\n----- APP COMPLETION (CONSOLE FALLBACK) -----")
@@ -259,13 +249,12 @@ class ReceiptManager:
 
     def _cut_paper(self):
         """Cut the paper if the printer supports it."""
-        if self.initialized:
-            try:
-                thermal_printer_manager.cut_paper()
-                return True
-            except Exception as e:
-                self.logger.error(f"Error cutting paper: {e}")
-        return False
+        try:
+            thermal_printer_manager.cut_paper()
+            return True
+        except Exception as e:
+            self.logger.error(f"Error cutting paper: {e}")
+            return False
 
 # Create a global instance for easy import from other modules
 receipt_manager = ReceiptManager()

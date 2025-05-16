@@ -69,10 +69,10 @@ PAYMENT_MODE = {
     }
 }
 
-# Initialize the thermal printer
+# Initialize the thermal printer - simplified to always return True
 def init_thermal_printer():
-    """Initialize the thermal printer."""
-    return thermal_printer_manager.initialize()
+    """Check printer status - simplified to always return True."""
+    return True if thermal_printer_manager.printer else False
 
 # --- QR Code Generation --- 
 def generate_qr_code_base64(url: str) -> str:
@@ -543,10 +543,7 @@ if __name__ == "__main__":
             payment_url = f"http://{local_ip}:{port}{payment_url}"
     
     # Print initial payment header
-    if receipt_manager.initialized:
-        receipt_manager.print_payment_header(payment_service, payment_url)
-    else:
-        print("NOTICE: Thermal printer not initialized. Printing to console only.")
+    receipt_manager.print_payment_header(payment_service, payment_url)
     
     # Use port 5002 for local testing
     port = int(os.getenv("PORT", 5002))

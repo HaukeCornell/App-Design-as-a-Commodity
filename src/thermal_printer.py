@@ -100,7 +100,7 @@ class ThermalPrinter:
                 print(f"[FALLBACK] {lines}")
             return False
 
-    def print_qr(self, data, text_above=None, text_below=None, cut=False):
+    def print_qr(self, data, text_above=None, text_below=None, cut=False, size=6):
         """
         Print a QR code to the thermal printer with optional text.
         
@@ -109,6 +109,7 @@ class ThermalPrinter:
             text_above: Text to print above the QR code
             text_below: Text to print below the QR code
             cut: Whether to cut the paper after printing
+            size: Size of the QR code (default: 6)
             
         Returns:
             True if successful, False otherwise
@@ -130,7 +131,7 @@ class ThermalPrinter:
             if text_above:
                 self.printer.text(f"{text_above}\n")
                 
-            self.printer.qr(data)
+            self.printer.qr(data, size=size)
             
             if text_below:
                 self.printer.text(f"{text_below}\n")

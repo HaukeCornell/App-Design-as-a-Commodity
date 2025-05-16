@@ -25,18 +25,16 @@ class ReceiptManager:
     def print_payment_header(self, payment_mode, payment_url):
         """
         Print the initial receipt header when waiting for payment.
-        Cuts the paper if a new transaction is starting.
+        Always cuts the paper and prints a new header when called.
         
         Args:
             payment_mode: The payment mode name (e.g., "Venmo" or "VibePay")
             payment_url: The URL to use for the payment QR code
         """
-        # Cut the paper to start a new transaction
-        if self.current_transaction_in_progress:
-            thermal_printer_manager.cut_paper()
-            self.current_transaction_in_progress = False
+        # Always cut the paper before printing a new header
+        thermal_printer_manager.cut_paper()
         
-        # Mark that we're starting a new transaction
+        # Always mark that we're starting a new transaction
         self.current_transaction_in_progress = True
         
         # Header lines to print
@@ -71,12 +69,13 @@ class ReceiptManager:
             # Print the header
             thermal_printer_manager.print_text(header_lines, align='center', cut=False)
             
-            # Print the payment QR code
+            # Print the payment QR code - with larger size
             thermal_printer_manager.print_qr(
                 payment_url, 
                 text_above=f"PAY WITH {payment_mode.upper()}", 
                 text_below="Include app description in payment note",
-                cut=False
+                cut=False,
+                size=10  # Increase QR code size (default is usually 3-4)
             )
             
             # Add a waiting message
@@ -89,19 +88,20 @@ class ReceiptManager:
             ], align='center', cut=False)
             
             self.logger.info(f"Payment header printed for {payment_mode}")
+            return True
         except Exception as e:
             self.logger.error(f"Error printing payment header: {e}")
-            # Still consider this a successful print for flow purposes
-        else:
-            # Console fallback when printer not available
-            self.logger.info("\n----- PAYMENT HEADER (CONSOLE FALLBACK) -----")
+            
+            # Print debugging info to console
+            self.logger.info("\n----- PAYMENT HEADER (ERROR FALLBACK) -----")
             for line in header_lines:
                 self.logger.info(line)
             self.logger.info(f"QR CODE URL: {payment_url}")
             self.logger.info(f"WAITING FOR PAYMENT... ({time.strftime('%H:%M:%S')})")
             self.logger.info("----------------------------------------")
-        
-        return True
+            
+            # Still consider this a successful print for flow purposes
+            return True
     
     def print_payment_confirmation(self, payment_details):
         """
@@ -215,7 +215,8 @@ class ReceiptManager:
                     hosted_url_full,
                     text_above="YOUR APP IS READY",
                     text_below="Thank you for using Vibe Coder!",
-                    cut=False
+                    cut=False,
+                    size=10  # Increase QR code size
                 )
             
                 # Add a final thank you message and cut the paper
@@ -229,9 +230,9 @@ class ReceiptManager:
                     "QR CODE ERROR - USE URL BELOW:",
                     hosted_url_full,
                 ], align='center', cut=False)
-            else:
-                # Console fallback
-                self.logger.info("\n----- APP COMPLETION (CONSOLE FALLBACK) -----")
+                
+                # Console debugging info
+                self.logger.info("\n----- APP COMPLETION (ERROR FALLBACK) -----")
                 for line in completion_lines:
                     self.logger.info(line)
                 self.logger.info(f"QR CODE URL: {hosted_url_full}")

@@ -344,7 +344,9 @@ def toggle_payment_mode():
             payment_url = f"http://{local_ip}:{port}{payment_url}"
     
     # Use receipt manager to print the new header with QR code
-    receipt_manager.print_payment_header(payment_service, payment_url)
+    add_log(f"Printing header for {payment_service} with URL: {payment_url}", "debug")
+    result = receipt_manager.print_payment_header(payment_service, payment_url)
+    add_log(f"Header print result: {'Success' if result else 'Failed'}", "debug")
     
     return jsonify({
         "message": f"Payment mode switched to {requested_mode}",

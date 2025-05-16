@@ -189,18 +189,42 @@ def index():
     """Serve the main HTML page."""
     return send_from_directory(app.static_folder, "index.html")
 
-@app.route("/apps/<app_id>/", defaults={'path': 'index.html'})
-@app.route("/apps/<app_id>/<path:path>")
-def serve_generated_app(app_id, path):
-    """Serve files from generated apps directory."""
-    app_dir = os.path.join(GENERATED_APPS_DIR, app_id)
+@app.route("/apps/<path_or_id>/", defaults={'path': 'index.html'})
+@app.route("/apps/<path_or_id>/<path:path>")
+def serve_generated_app(path_or_id, path):
+    """
+    Serve files from generated apps directory.
+    Can use either app_id or slug as the path parameter.
+    """
+    # First try direct match with directory name (app_id)
+    app_dir = os.path.join(GENERATED_APPS_DIR, path_or_id)
     
-    # Check if the app directory exists
-    if not os.path.isdir(app_dir):
-        return "App not found", 404
+    # Check if the app directory exists with that exact name
+    if os.path.isdir(app_dir):
+        # Direct match found (likely an app_id)
+        return send_from_directory(app_dir, path)
+    
+    # If not found directly, try to find it by slug using the mapping file
+    try:
+        import json
+        mapping_file = os.path.join(GENERATED_APPS_DIR, "slug_mapping.json")
         
-    # Serve the requested file from the app directory
-    return send_from_directory(app_dir, path)
+        if os.path.exists(mapping_file):
+            with open(mapping_file, 'r') as f:
+                mapping = json.load(f)
+                
+            # Look up app_id by slug
+            if path_or_id in mapping:
+                app_id = mapping[path_or_id]
+                app_dir = os.path.join(GENERATED_APPS_DIR, app_id)
+                
+                if os.path.isdir(app_dir):
+                    return send_from_directory(app_dir, path)
+    except Exception as e:
+        print(f"Error looking up slug mapping: {e}")
+    
+    # If still not found
+    return "App not found", 404
 
 @app.route("/vibepay")
 def vibepay_payment():
@@ -463,12 +487,16 @@ def generate_app_for_payment(app_type: str, payment_amount: float, user_who_paid
             app_id = generated_app_details["app_id"]
             app_tier = generated_app_details["tier"]
             actual_app_type = generated_app_details["app_type"] # Use type from details
+            app_title = generated_app_details.get("title", actual_app_type)
+            app_slug = generated_app_details.get("slug", "")
     
-            # Call GitHub Integration
+            # Call GitHub Integration with title and slug
             github_url = github_service.push_to_github(
                 generated_app_details["path"], 
                 app_id,
-                actual_app_type
+                actual_app_type,
+                title=app_title,
+                slug=app_slug
             )
             
             # Generate base URL for hosted app using IP address
@@ -477,7 +505,9 @@ def generate_app_for_payment(app_type: str, payment_amount: float, user_who_paid
             if not base_url.startswith(('http://', 'https://')):
                 base_url = f"http://{base_url}"
                 
-            hosted_url_relative = f"/apps/{app_id}/"
+            # Use the slug in the URL if available, otherwise use app_id
+            url_path = app_slug if app_slug else app_id
+            hosted_url_relative = f"/apps/{url_path}/"
             hosted_url_full = f"{base_url.strip('/')}{hosted_url_relative}"
             
             # Generate QR code for the app (for UI)

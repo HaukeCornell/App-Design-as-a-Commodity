@@ -50,6 +50,34 @@ def generate_friendly_app_id():
     
     return f"{letters_part}{digits_part}"
 
+def create_slug_from_title(title):
+    """
+    Creates a URL-friendly slug from an app title.
+    Converts the title to lowercase, replaces spaces with dashes, and removes special characters.
+    
+    Args:
+        title: The app title to convert
+        
+    Returns:
+        A URL-friendly slug (e.g. "my-weather-app")
+    """
+    import re
+    # Convert to lowercase, replace spaces with dashes
+    slug = title.lower().replace(' ', '-')
+    # Remove special characters
+    slug = re.sub(r'[^a-z0-9\-]', '', slug)
+    # Remove multiple dashes
+    slug = re.sub(r'\-+', '-', slug)
+    # Limit length to 50 characters
+    slug = slug[:50].strip('-')
+    # Add random characters if too short
+    if len(slug) < 3:
+        import random
+        import string
+        chars = ''.join(random.choices(string.ascii_lowercase + string.digits, k=5))
+        slug = f"app-{chars}" if not slug else f"{slug}-{chars}"
+    return slug
+
 def generate_code_with_gemini(app_type: str, tier: str, readme_content: str) -> str | None:
     """Generates HTML/CSS/JS code using Gemini based on app type, tier, and README content."""
     if not model:
@@ -158,6 +186,45 @@ def generate_readme_with_gemini(app_type: str, amount: float, tier: str, app_id:
             f"Thank you to testuser for the Venmo payment of ${amount:.2f}!\n"
         )
 
+def update_slug_mapping(app_id, slug):
+    """
+    Updates a JSON file that maps slugs to app IDs.
+    This allows looking up apps by their friendly URL slug.
+    
+    Args:
+        app_id: The unique ID of the app
+        slug: The URL-friendly slug for the app
+    """
+    import json
+    import os
+    
+    # Skip if no slug provided
+    if not slug:
+        return
+        
+    # Path to the mapping file
+    mapping_file = os.path.join(GENERATED_APPS_DIR, "slug_mapping.json")
+    
+    # Load existing mapping or create new one
+    mapping = {}
+    if os.path.exists(mapping_file):
+        try:
+            with open(mapping_file, 'r') as f:
+                mapping = json.load(f)
+        except Exception as e:
+            print(f"Error loading slug mapping: {e}")
+    
+    # Add or update the mapping
+    mapping[slug] = app_id
+    
+    # Save the updated mapping
+    try:
+        with open(mapping_file, 'w') as f:
+            json.dump(mapping, f, indent=2)
+        print(f"Updated slug mapping: {slug} -> {app_id}")
+    except Exception as e:
+        print(f"Error saving slug mapping: {e}")
+
 def generate_app_files(app_type: str, amount: float) -> dict | None:
     """Generates app files using Gemini, saves them, and returns details."""
     
@@ -181,7 +248,21 @@ def generate_app_files(app_type: str, amount: float) -> dict | None:
             import shutil
             shutil.rmtree(app_dir)
         return None
-
+        
+    # Try to extract a title from the README
+    app_title = app_type  # Default to app_type if we can't find a title
+    try:
+        import re
+        # Look for the first markdown heading (# Title)
+        title_match = re.search(r'^#\s+(.+)$', generated_readme, re.MULTILINE)
+        if title_match:
+            app_title = title_match.group(1).strip()
+    except Exception as e:
+        print(f"Error extracting title from README: {e}")
+    
+    # Create a URL-friendly slug from the title
+    app_slug = create_slug_from_title(app_title)
+    
     # Generate code using Gemini, now including the generated_readme
     generated_html = generate_code_with_gemini(app_type, tier, generated_readme)
 
@@ -202,17 +283,22 @@ def generate_app_files(app_type: str, amount: float) -> dict | None:
         # Save HTML file
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(generated_html)
-            
+        
+        # Update slug mapping
+        update_slug_mapping(app_id, app_slug)
+        
         print(f"Generated app 	{app_id}	 at 	{output_path}")
         
         return {
             "app_id": app_id,
             "app_type": app_type,
+            "title": app_title,        # The extracted title from README
+            "slug": app_slug,          # URL-friendly version of the title
             "amount": amount,
             "tier": tier,
-            "path": app_dir, # Directory containing the generated app (index.html)
-            "file_path": output_path, # Specific path to the index.html file
-            "readme_path": readme_path # Path to the README.md file
+            "path": app_dir,           # Directory containing the generated app (index.html)
+            "file_path": output_path,  # Specific path to the index.html file
+            "readme_path": readme_path  # Path to the README.md file
         }
 
     except Exception as e:
